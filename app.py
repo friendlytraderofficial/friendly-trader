@@ -2,13 +2,17 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import requests
+
 from strategy import generate_signal, backtest
+
 
 st.set_page_config(
     page_title="Friendly Trader",
     page_icon="📈",
     layout="wide"
 )
+
 
 st.markdown("""
 <style>
@@ -29,92 +33,169 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
 st.title("Friendly Trader")
-st.caption("Trade Smart. Trade Friendly. — Alpha 0.1 Research Prototype")
-
-# Demo XAUUSD data
-np.random.seed(7)
-
-n = 1200
-
-dates = pd.date_range(
-    "2026-01-01",
-    periods=n,
-    freq="15min"
+st.caption(
+    "Trade Smart. Trade Friendly. — Alpha 0.2 Research Prototype"
 )
 
-returns = np.random.normal(
-    0,
-    0.0008,
-    n
-)
 
-price = 2350 * np.exp(
-    np.cumsum(returns)
-)
+# ---------------------------------------------------------
+# REAL XAU/USD DATA
+# ---------------------------------------------------------
 
-df = pd.DataFrame({
-    "time": dates,
-    "open": price,
-    "high": price * (
-        1 + np.random.uniform(0, 0.0015, n)
-    ),
-    "low": price * (
-        1 - np.random.uniform(0, 0.0015, n)
-    ),
-    "close": price * (
-        1 + np.random.normal(0, 0.00035, n)
+@st.cache_data(ttl=60)
+def get_xauusd_data():
+
+    api_key = st.secrets["TWELVE_DATA_API_KEY"]
+
+    url = "https://api.twelvedata.com/time_series"
+
+    params = {
+        "symbol": "XAU/USD",
+        "interval": "15min",
+        "outputsize": 500,
+        "apikey": api_key
+    }
+
+    response = requests.get(
+        url,
+        params=params,
+        timeout=20
     )
-})
 
-df["high"] = df[
-    ["open", "high", "close"]
-].max(axis=1)
+    response.raise_for_status()
 
-df["low"] = df[
-    ["open", "low", "close"]
-].min(axis=1)
+    data = response.json()
+
+    if "values" not in data:
+        raise RuntimeError(
+            f"Twelve Data error: {data}"
+        )
+
+    df = pd.DataFrame(data["values"])
+
+    df["datetime"] = pd.to_datetime(
+        df["datetime"]
+    )
+
+    numeric_columns = [
+        "open",
+        "high",
+        "low",
+        "close"
+    ]
+
+    for column in numeric_columns:
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce"
+        )
+
+    df = df.dropna()
+
+    df = df.sort_values(
+        "datetime"
+    ).reset_index(drop=True)
+
+    df = df.rename(
+        columns={
+            "datetime": "time"
+        }
+    )
+
+    return df
+
+
+# ---------------------------------------------------------
+# LOAD DATA
+# ---------------------------------------------------------
+
+try:
+
+    df = get_xauusd_data()
+
+except Exception as e:
+
+    st.error(
+        "Unable to load real XAU/USD data."
+    )
+
+    st.code(str(e))
+
+    st.stop()
+
+
+if len(df) < 100:
+
+    st.error(
+        "Not enough market data received."
+    )
+
+    st.stop()
+
+
+# ---------------------------------------------------------
+# SIGNAL
+# ---------------------------------------------------------
 
 signal = generate_signal(df)
 
-# Top metrics
+
+# ---------------------------------------------------------
+# TOP METRICS
+# ---------------------------------------------------------
+
 c1, c2, c3, c4 = st.columns(4)
+
 
 c1.metric(
     "XAUUSD",
     f"${df.close.iloc[-1]:,.2f}"
 )
 
+
 c2.metric(
     "Signal",
     signal["direction"]
 )
+
 
 c3.metric(
     "Score",
     f'{signal["score"]}/10'
 )
 
+
 c4.metric(
     "Risk / Reward",
     "1:3"
 )
 
-# Main layout
+
+# ---------------------------------------------------------
+# MARKET CHART
+# ---------------------------------------------------------
+
 left, right = st.columns([2.2, 1])
+
 
 with left:
 
-    st.subheader("📊 XAUUSD Market Chart")
+    st.subheader(
+        "📊 XAUUSD 15-Minute Market Chart"
+    )
+
+    chart_data = df.tail(250)
 
     fig = go.Figure(
         data=[
             go.Candlestick(
-                x=df.time.tail(250),
-                open=df.open.tail(250),
-                high=df.high.tail(250),
-                low=df.low.tail(250),
-                close=df.close.tail(250)
+                x=chart_data.time,
+                open=chart_data.open,
+                high=chart_data.high,
+                low=chart_data.low,
+                close=chart_data.close
             )
         ]
     )
@@ -130,9 +211,16 @@ with left:
         use_container_width=True
     )
 
+
+# ---------------------------------------------------------
+# SIGNAL PANEL
+# ---------------------------------------------------------
+
 with right:
 
-    st.subheader("🚨 Latest Signal")
+    st.subheader(
+        "🚨 Latest Signal"
+    )
 
     st.markdown(
         f"## {signal['direction']}"
@@ -159,48 +247,109 @@ with right:
         f"{signal['score']}/10"
     )
 
-    st.info(
-        "Prototype only. "
-        "Real-money execution is disabled."
-    )
+    if signal["direction"] == "WAIT":
+
+        st.warning(
+            "Weak setup — wait for confirmation."
+        )
+
+    else:
+
+        st.info(
+            "Research signal only. "
+            "Real-money execution is disabled."
+        )
+
+
+# ---------------------------------------------------------
+# MARKET INFORMATION
+# ---------------------------------------------------------
 
 st.divider()
 
-st.subheader("🧪 50-Trade Backtest")
+st.subheader(
+    "📡 Market Data"
+)
+
+d1, d2, d3 = st.columns(3)
+
+
+d1.metric(
+    "Candles Loaded",
+    len(df)
+)
+
+
+d2.metric(
+    "Timeframe",
+    "15 Minutes"
+)
+
+
+d3.metric(
+    "Data Source",
+    "Twelve Data"
+)
+
+
+# ---------------------------------------------------------
+# BACKTEST
+# ---------------------------------------------------------
+
+st.divider()
+
+st.subheader(
+    "🧪 50-Trade Research Backtest"
+)
+
 
 results = backtest(
     df,
     trades=50
 )
 
+
 m1, m2, m3, m4, m5 = st.columns(5)
+
 
 m1.metric(
     "Trades",
     results["trades"]
 )
 
+
 m2.metric(
     "Win Rate",
     f'{results["win_rate"]:.1f}%'
 )
+
 
 m3.metric(
     "Net R",
     f'{results["net_r"]:.2f}R'
 )
 
+
 m4.metric(
     "Profit Factor",
     f'{results["profit_factor"]:.2f}'
 )
+
 
 m5.metric(
     "Max Drawdown",
     f'{results["max_drawdown"]:.2f}R'
 )
 
-st.subheader("📒 Trade Journal")
+
+# ---------------------------------------------------------
+# TRADE JOURNAL
+# ---------------------------------------------------------
+
+st.subheader(
+    "📒 Trade Journal"
+)
+
 
 st.dataframe(
     results["journal"],
@@ -208,7 +357,9 @@ st.dataframe(
     hide_index=True
 )
 
+
 st.caption(
-    "Alpha 0.1 uses synthetic data. "
-    "Do not use these results for real trading."
-)
+    "Alpha 0.2 uses real XAU/USD market data. "
+    "Backtest results are research results only "
+    "and should not be treated as proof of future performance."
+    )        
