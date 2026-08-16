@@ -284,4 +284,23 @@ st.subheader(
 )
 
 d1, d2, d3, d4 = st.columns(4)
+d1.metric(
+    "15M Candles",
+    len(df_15m)
+)
+
+d2.metric(
+    "1H Candles",
+    len(df_1h)
+)
+
+d3.metric(
+    "4H Candles",
+    len(df_4h)
+)
+
+d4.metric(
+    "Source",
+    "Twelve Data"
+)
 
