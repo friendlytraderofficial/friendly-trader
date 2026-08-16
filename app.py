@@ -6,6 +6,10 @@ import requests
 from strategy import generate_signal, backtest
 
 
+# =========================================================
+# PAGE CONFIG
+# =========================================================
+
 st.set_page_config(
     page_title="Friendly Trader",
     page_icon="📈",
@@ -13,25 +17,29 @@ st.set_page_config(
 )
 
 
-st.markdown("""
-<style>
-.main {
-    background-color: #080b14;
-}
+# =========================================================
+# STYLE
+# =========================================================
 
-.block-container {
-    padding-top: 1.2rem;
-}
+st.markdown(
+    """
+    <style>
+    .main {
+        background-color: #080b14;
+    }
 
-.metric-card {
-    padding: 14px;
-    border-radius: 12px;
-    background: #111827;
-    border: 1px solid #253047;
-}
-</style>
-""", unsafe_allow_html=True)
+    .block-container {
+        padding-top: 1.2rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
+
+# =========================================================
+# HEADER
+# =========================================================
 
 st.title("Friendly Trader")
 
@@ -41,7 +49,7 @@ st.caption(
 
 
 # =========================================================
-# TWELVE DATA
+# TWELVE DATA FUNCTION
 # =========================================================
 
 @st.cache_data(ttl=60)
@@ -137,7 +145,7 @@ try:
 except Exception as e:
 
     st.error(
-        "Unable to load real XAU/USD data."
+        "Unable to load XAU/USD market data."
     )
 
     st.code(
@@ -147,10 +155,30 @@ except Exception as e:
     st.stop()
 
 
+# =========================================================
+# DATA VALIDATION
+# =========================================================
+
 if len(df_15m) < 200:
 
     st.error(
-        "Not enough 15-minute market data."
+        "Not enough 15-minute data."
+    )
+
+    st.stop()
+
+if len(df_1h) < 200:
+
+    st.error(
+        "Not enough 1-hour data."
+    )
+
+    st.stop()
+
+if len(df_4h) < 200:
+
+    st.error(
+        "Not enough 4-hour data."
     )
 
     st.stop()
@@ -169,14 +197,28 @@ st.success(
 
 
 # =========================================================
-# ALPHA 0.6 SIGNAL
+# GENERATE CURRENT SIGNAL
 # =========================================================
 
-signal = generate_signal(
-    df_15m,
-    df_1h,
-    df_4h
-)
+try:
+
+    signal = generate_signal(
+        df_15m,
+        df_1h,
+        df_4h
+    )
+
+except Exception as e:
+
+    st.error(
+        "Signal generation failed."
+    )
+
+    st.code(
+        str(e)
+    )
+
+    st.stop()
 
 
 # =========================================================
@@ -188,7 +230,7 @@ c1, c2, c3, c4 = st.columns(4)
 
 c1.metric(
     "XAUUSD",
-    f"${df_15m.close.iloc[-1]:,.2f}"
+    f"${df_15m['close'].iloc[-1]:,.2f}"
 )
 
 
@@ -200,7 +242,7 @@ c2.metric(
 
 c3.metric(
     "Score",
-    f'{signal["score"]}/10'
+    f"{signal['score']}/10"
 )
 
 
@@ -211,7 +253,7 @@ c4.metric(
 
 
 # =========================================================
-# MAIN LAYOUT
+# CHART + SIGNAL
 # =========================================================
 
 left, right = st.columns(
@@ -233,100 +275,7 @@ with left:
         250
     )
 
-    fig = go.Figure(
-        data=[
-            go.Candlestick(
+    fig = go.Figure()
 
-                x=chart_data["time"],
-
-                open=chart_data["open"],
-
-                high=chart_data["high"],
-
-                low=chart_data["low"],
-
-                close=chart_data["close"]
-            )
-        ]
-    )
-
-    fig.update_layout(
-
-        template="plotly_dark",
-
-        height=520,
-
-        xaxis_rangeslider_visible=False
-    )
-
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
-
-
-# =========================================================
-# LATEST SIGNAL
-# =========================================================
-
-with right:
-
-    st.subheader(
-        "🚨 Latest Signal"
-    )
-
-    st.markdown(
-        f"## {signal['direction']}"
-    )
-
-    st.write(
-        f"**Entry:** {signal['entry']}"
-    )
-
-    st.write(
-        f"**Stop Loss:** {signal['sl']}"
-    )
-
-    st.write(
-        f"**Take Profit:** {signal['tp']}"
-    )
-
-    st.progress(
-        min(
-            signal["score"] / 10,
-            1.0
-        )
-    )
-
-    st.write(
-        f"**Setup Score:** "
-        f"{signal['score']}/10"
-    )
-
-    st.write(
-        f"**1H Trend:** "
-        f"{signal.get('h1_trend', 'N/A')}"
-    )
-
-    st.write(
-        f"**4H Trend:** "
-        f"{signal.get('h4_trend', 'N/A')}"
-    )
-
-    if signal["direction"] == "WAIT":
-
-        st.warning(
-            "Weak setup — wait for confirmation."
-        )
-
-    else:
-
-        st.info(
-            "Research signal only. "
-            "Real-money execution is disabled."
-        )
-
-
-# =========================================================
-# MARKET DATA
-#
+    fig.add_trace(
+        go.Cand
