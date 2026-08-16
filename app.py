@@ -7,7 +7,7 @@ from strategy import generate_signal, backtest
 
 
 # =========================================================
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # =========================================================
 
 st.set_page_config(
@@ -29,7 +29,7 @@ st.caption(
 
 
 # =========================================================
-# LOAD XAUUSD DATA FROM TWELVE DATA
+# TWELVE DATA
 # =========================================================
 
 @st.cache_data(ttl=60)
@@ -57,56 +57,37 @@ def get_xauusd_data(interval, outputsize):
     result = response.json()
 
     if "values" not in result:
-
         raise RuntimeError(
             f"Twelve Data error: {result}"
         )
 
-    df = pd.DataFrame(
-        result["values"]
-    )
+    df = pd.DataFrame(result["values"])
 
     df["time"] = pd.to_datetime(
         df["datetime"]
     )
 
-    for column in [
-        "open",
-        "high",
-        "low",
-        "close"
-    ]:
-
+    for column in ["open", "high", "low", "close"]:
         df[column] = pd.to_numeric(
             df[column],
             errors="coerce"
         )
 
     df = df[
-        [
-            "time",
-            "open",
-            "high",
-            "low",
-            "close"
-        ]
+        ["time", "open", "high", "low", "close"]
     ]
 
     df = df.dropna()
 
-    df = df.sort_values(
-        "time"
-    )
+    df = df.sort_values("time")
 
-    df = df.reset_index(
-        drop=True
-    )
+    df = df.reset_index(drop=True)
 
     return df
 
 
 # =========================================================
-# LOAD 15M / 1H / 4H DATA
+# LOAD DATA
 # =========================================================
 
 try:
@@ -128,44 +109,9 @@ try:
 
 except Exception as e:
 
-    st.error(
-        "Market data loading failed."
-    )
+    st.error("Market data loading failed.")
 
-    st.code(
-        str(e)
-    )
-
-    st.stop()
-
-
-# =========================================================
-# DATA VALIDATION
-# =========================================================
-
-if len(df_15m) < 200:
-
-    st.error(
-        "Not enough 15-minute data."
-    )
-
-    st.stop()
-
-
-if len(df_1h) < 200:
-
-    st.error(
-        "Not enough 1-hour data."
-    )
-
-    st.stop()
-
-
-if len(df_4h) < 200:
-
-    st.error(
-        "Not enough 4-hour data."
-    )
+    st.code(str(e))
 
     st.stop()
 
@@ -183,7 +129,7 @@ st.success(
 
 
 # =========================================================
-# CURRENT SIGNAL
+# SIGNAL
 # =========================================================
 
 try:
@@ -196,13 +142,9 @@ try:
 
 except Exception as e:
 
-    st.error(
-        "Signal generation failed."
-    )
+    st.error("Signal generation failed.")
 
-    st.code(
-        str(e)
-    )
+    st.code(str(e))
 
     st.stop()
 
@@ -213,24 +155,20 @@ except Exception as e:
 
 c1, c2, c3, c4 = st.columns(4)
 
-
 c1.metric(
     "XAUUSD",
     f"${df_15m['close'].iloc[-1]:,.2f}"
 )
-
 
 c2.metric(
     "Signal",
     signal["direction"]
 )
 
-
 c3.metric(
     "Score",
     f"{signal['score']}/10"
 )
-
 
 c4.metric(
     "Risk / Reward",
@@ -239,12 +177,10 @@ c4.metric(
 
 
 # =========================================================
-# CHART AND SIGNAL PANEL
+# MAIN SECTION
 # =========================================================
 
-left, right = st.columns(
-    [2.2, 1]
-)
+left, right = st.columns([2.2, 1])
 
 
 # =========================================================
@@ -257,9 +193,7 @@ with left:
         "📊 XAUUSD 15-Minute Market Chart"
     )
 
-    chart_data = df_15m.tail(
-        250
-    )
+    chart_data = df_15m.tail(250)
 
     fig = go.Figure()
 
@@ -314,10 +248,7 @@ with right:
 
     score = max(
         0,
-        min(
-            10,
-            signal["score"]
-        )
+        min(10, signal["score"])
     )
 
     st.progress(
@@ -362,27 +293,22 @@ st.subheader(
     "📡 Market Data"
 )
 
-
 d1, d2, d3, d4 = st.columns(4)
-
 
 d1.metric(
     "15M Candles",
     len(df_15m)
 )
 
-
 d2.metric(
     "1H Candles",
     len(df_1h)
 )
 
-
 d3.metric(
     "4H Candles",
     len(df_4h)
 )
-
 
 d4.metric(
     "Data Source",
@@ -400,68 +326,65 @@ st.subheader(
     "🧪 50-Trade Research Backtest"
 )
 
+st.info(
+    "Running the multi-timeframe research backtest..."
+)
 
-# Visible message while the calculation runs
-with st.spinner(
-    "Running Alpha 0.6 multi-timeframe backtest..."
-):
+try:
 
-    try:
+    results = backtest(
+        df_15m,
+        df_1h,
+        df_4h,
+        trades=50
+    )
 
-        results = backtest(
-            df_15m,
-            df_1h,
-            df_4h,
-            trades=50
-        )
+except Exception as e:
 
-    except Exception as e:
+    st.error(
+        "Backtest failed."
+    )
 
-        st.error(
-            "Backtest failed."
-        )
+    st.code(
+        str(e)
+    )
 
-        st.code(
-            str(e)
-        )
-
-        st.stop()
+    st.stop()
 
 
 # =========================================================
-# BACKTEST RESULTS
+# BACKTEST METRICS
 # =========================================================
+
+st.subheader(
+    "📈 Backtest Results"
+)
 
 m1, m2, m3, m4, m5 = st.columns(5)
 
-
 m1.metric(
     "Trades",
-    results["trades"]
+    results.get("trades", 0)
 )
-
 
 m2.metric(
     "Win Rate",
-    f"{results['win_rate']:.1f}%"
+    f"{results.get('win_rate', 0):.1f}%"
 )
-
 
 m3.metric(
     "Net R",
-    f"{results['net_r']:.2f}R"
+    f"{results.get('net_r', 0):.2f}R"
 )
-
 
 m4.metric(
     "Profit Factor",
-    f"{results['profit_factor']:.2f}"
+    f"{results.get('profit_factor', 0):.2f}"
 )
-
 
 m5.metric(
     "Max Drawdown",
-    f"{results['max_drawdown']:.2f}R"
+    f"{results.get('max_drawdown', 0):.2f}R"
 )
 
 
@@ -485,15 +408,33 @@ st.subheader(
     "📒 Trade Journal"
 )
 
-
 journal = results.get(
-    "journal"
+    "journal",
+    pd.DataFrame()
 )
 
+if isinstance(journal, pd.DataFrame) and not journal.empty:
 
-if (
-    journal is not None
-    and len(journal) > 0
-):
+    st.dataframe(
+        journal,
+        use_container_width=True,
+        hide_index=True
+    )
 
-   
+else:
+
+    st.info(
+        "No qualifying trades were found."
+    )
+
+
+# =========================================================
+# FOOTER
+# =========================================================
+
+st.caption(
+    "Alpha 0.6 uses real XAU/USD market data "
+    "with 15M + 1H + 4H confirmation. "
+    "Backtest results are research results only "
+    "and should not be treated as proof of future performance."
+    )
