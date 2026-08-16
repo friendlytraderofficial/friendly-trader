@@ -3,7 +3,10 @@ import pandas as pd
 
 
 def add_indicators(df):
+
     data = df.copy()
+
+    data = data.sort_values("time").reset_index(drop=True)
 
     data["ema20"] = data["close"].ewm(
         span=20,
@@ -28,10 +31,7 @@ def add_indicators(df):
     avg_gain = gain.rolling(14).mean()
     avg_loss = loss.rolling(14).mean()
 
-    rs = avg_gain / avg_loss.replace(
-        0,
-        np.nan
-    )
+    rs = avg_gain / avg_loss.replace(0, np.nan)
 
     data["rsi"] = 100 - (
         100 / (1 + rs)
@@ -40,30 +40,35 @@ def add_indicators(df):
     previous_close = data["close"].shift(1)
 
     tr1 = data["high"] - data["low"]
-    tr2 = abs(
+
+    tr2 = (
         data["high"] -
         previous_close
-    )
-    tr3 = abs(
+    ).abs()
+
+    tr3 = (
         data["low"] -
         previous_close
-    )
+    ).abs()
 
     data["tr"] = pd.concat(
         [tr1, tr2, tr3],
         axis=1
     ).max(axis=1)
 
-    data["atr"] = data["tr"].rolling(
-        14
-    ).mean()
+    data["atr"] = data["tr"].rolling(14).mean()
 
     return data
 
 
-def trend_direction(df):
+def get_trend(df):
 
     data = add_indicators(df)
+
+    data = data.dropna().copy()
+
+    if len(data) == 0:
+        return "NEUTRAL"
 
     row = data.iloc[-1]
 
@@ -92,7 +97,7 @@ def generate_signal(
 
     data = add_indicators(
         df_15m
-    )
+    ).dropna().copy()
 
     latest = data.iloc[-1]
 
@@ -128,7 +133,7 @@ def generate_signal(
     sell_score = 0
 
     # -------------------------
-    # 15M SETUP
+    # 15M
     # -------------------------
 
     if ema20 > ema50:
@@ -162,23 +167,18 @@ def generate_signal(
         sell_score -= 1
 
     # -------------------------
-    # HIGHER TIMEFRAME FILTER
+    # Higher timeframes
     # -------------------------
 
     h1_trend = "NEUTRAL"
     h4_trend = "NEUTRAL"
 
     if df_1h is not None:
-        h1_trend = trend_direction(
-            df_1h
-        )
+        h1_trend = get_trend(df_1h)
 
     if df_4h is not None:
-        h4_trend = trend_direction(
-            df_4h
-        )
+        h4_trend = get_trend(df_4h)
 
-    # Strong confirmation
     if h1_trend == "BULLISH":
         buy_score += 2
 
@@ -202,7 +202,7 @@ def generate_signal(
     )
 
     # -------------------------
-    # FINAL DECISION
+    # Final signal
     # -------------------------
 
     if (
@@ -217,9 +217,7 @@ def generate_signal(
 
         entry = price
         sl = entry - atr
-        tp = entry + (
-            3 * atr
-        )
+        tp = entry + (3 * atr)
 
     elif (
         sell_score >= 8
@@ -233,9 +231,7 @@ def generate_signal(
 
         entry = price
         sl = entry + atr
-        tp = entry - (
-            3 * atr
-        )
+        tp = entry - (3 * atr)
 
     else:
 
@@ -252,21 +248,101 @@ def generate_signal(
     return {
         "direction": direction,
         "score": int(score),
-        "entry": round(
-            entry,
-            2
-        ),
-        "sl": round(
-            sl,
-            2
-        ),
-        "tp": round(
-            tp,
-            2
-        ),
+        "entry": round(entry, 2),
+        "sl": round(sl, 2),
+        "tp": round(tp, 2),
         "h1_trend": h1_trend,
         "h4_trend": h4_trend
     }
+
+
+def prepare_multi_timeframe_data(
+    df_15m,
+    df_1h,
+    df_4h
+):
+
+    base = add_indicators(
+        df_15m
+    ).dropna().copy()
+
+    h1 = add_indicators(
+        df_1h
+    ).dropna().copy()
+
+    h4 = add_indicators(
+        df_4h
+    ).dropna().copy()
+
+    h1["h1_trend"] = np.where(
+        (
+            (h1["ema20"] > h1["ema50"]) &
+            (h1["ema50"] > h1["ema200"])
+        ),
+        "BULLISH",
+        np.where(
+            (
+                (h1["ema20"] < h1["ema50"]) &
+                (h1["ema50"] < h1["ema200"])
+            ),
+            "BEARISH",
+            "NEUTRAL"
+        )
+    )
+
+    h4["h4_trend"] = np.where(
+        (
+            (h4["ema20"] > h4["ema50"]) &
+            (h4["ema50"] > h4["ema200"])
+        ),
+        "BULLISH",
+        np.where(
+            (
+                (h4["ema20"] < h4["ema50"]) &
+                (h4["ema50"] < h4["ema200"])
+            ),
+            "BEARISH",
+            "NEUTRAL"
+        )
+    )
+
+    h1_small = h1[
+        ["time", "h1_trend"]
+    ].sort_values("time")
+
+    h4_small = h4[
+        ["time", "h4_trend"]
+    ].sort_values("time")
+
+    base = base.sort_values(
+        "time"
+    )
+
+    # Attach latest completed/available 1H trend
+    base = pd.merge_asof(
+        base,
+        h1_small,
+        on="time",
+        direction="backward"
+    )
+
+    # Attach latest completed/available 4H trend
+    base = pd.merge_asof(
+        base,
+        h4_small,
+        on="time",
+        direction="backward"
+    )
+
+    base["h1_trend"] = base[
+        "h1_trend"
+    ].fillna("NEUTRAL")
+
+    base["h4_trend"] = base[
+        "h4_trend"
+    ].fillna("NEUTRAL")
+
+    return base
 
 
 def backtest(
@@ -278,26 +354,35 @@ def backtest(
     cost_r=0.10
 ):
 
-    data = add_indicators(
-        df_15m
+    if df_1h is None or df_4h is None:
+
+        return {
+            "trades": 0,
+            "win_rate": 0,
+            "net_r": 0,
+            "profit_factor": 0,
+            "max_drawdown": 0,
+            "expectancy": 0,
+            "journal": pd.DataFrame()
+        }
+
+    data = prepare_multi_timeframe_data(
+        df_15m,
+        df_1h,
+        df_4h
     )
 
-    data = data.dropna().copy()
+    if len(data) == 0:
 
-    h1 = None
-    h4 = None
-
-    if df_1h is not None:
-
-        h1 = add_indicators(
-            df_1h
-        ).dropna().copy()
-
-    if df_4h is not None:
-
-        h4 = add_indicators(
-            df_4h
-        ).dropna().copy()
+        return {
+            "trades": 0,
+            "win_rate": 0,
+            "net_r": 0,
+            "profit_factor": 0,
+            "max_drawdown": 0,
+            "expectancy": 0,
+            "journal": pd.DataFrame()
+        }
 
     journal = []
 
@@ -306,7 +391,6 @@ def backtest(
     max_drawdown = 0.0
 
     wins = 0
-    losses = 0
 
     i = 0
 
@@ -345,15 +429,16 @@ def backtest(
             not np.isfinite(atr)
             or atr <= 0
         ):
+
             i += 1
             continue
 
-        # -------------------------
-        # 15M SCORE
-        # -------------------------
-
         buy_score = 0
         sell_score = 0
+
+        # -------------------------
+        # 15M conditions
+        # -------------------------
 
         if ema20 > ema50:
             buy_score += 2
@@ -386,61 +471,11 @@ def backtest(
             sell_score -= 1
 
         # -------------------------
-        # HISTORICAL 1H / 4H
+        # Higher timeframe
         # -------------------------
 
-        current_time = row["time"]
-
-        h1_trend = "NEUTRAL"
-        h4_trend = "NEUTRAL"
-
-        if h1 is not None:
-
-            h1_available = h1[
-                h1["time"] <= current_time
-            ]
-
-            if len(h1_available) > 0:
-
-                h1_row = h1_available.iloc[-1]
-
-                if (
-                    h1_row["ema20"] >
-                    h1_row["ema50"] >
-                    h1_row["ema200"]
-                ):
-                    h1_trend = "BULLISH"
-
-                elif (
-                    h1_row["ema20"] <
-                    h1_row["ema50"] <
-                    h1_row["ema200"]
-                ):
-                    h1_trend = "BEARISH"
-
-        if h4 is not None:
-
-            h4_available = h4[
-                h4["time"] <= current_time
-            ]
-
-            if len(h4_available) > 0:
-
-                h4_row = h4_available.iloc[-1]
-
-                if (
-                    h4_row["ema20"] >
-                    h4_row["ema50"] >
-                    h4_row["ema200"]
-                ):
-                    h4_trend = "BULLISH"
-
-                elif (
-                    h4_row["ema20"] <
-                    h4_row["ema50"] <
-                    h4_row["ema200"]
-                ):
-                    h4_trend = "BEARISH"
+        h1_trend = row["h1_trend"]
+        h4_trend = row["h4_trend"]
 
         if h1_trend == "BULLISH":
             buy_score += 2
@@ -455,7 +490,7 @@ def backtest(
             sell_score += 2
 
         # -------------------------
-        # ENTRY
+        # Entry
         # -------------------------
 
         if (
@@ -470,9 +505,7 @@ def backtest(
 
             entry = price
             sl = entry - atr
-            tp = entry + (
-                3 * atr
-            )
+            tp = entry + (3 * atr)
 
         elif (
             sell_score >= 8
@@ -486,9 +519,7 @@ def backtest(
 
             entry = price
             sl = entry + atr
-            tp = entry - (
-                3 * atr
-            )
+            tp = entry - (3 * atr)
 
         else:
 
@@ -502,8 +533,7 @@ def backtest(
         bars_held = 0
 
         end = min(
-            i + 1 +
-            max_holding_bars,
+            i + 1 + max_holding_bars,
             len(data)
         )
 
@@ -534,7 +564,163 @@ def backtest(
                 hit_sl = high >= sl
                 hit_tp = low <= tp
 
-            # Conservative same-candle rule
+            # Conservative assumption:
+            # if SL and TP occur in same candle,
+            # count it as a loss.
+
             if hit_sl and hit_tp:
 
-                result
+                result = "LOSS"
+                result_r = -1.0
+                exit_price = sl
+                exit_time = future["time"]
+                break
+
+            if hit_sl:
+
+                result = "LOSS"
+                result_r = -1.0
+                exit_price = sl
+                exit_time = future["time"]
+                break
+
+            if hit_tp:
+
+                result = "WIN"
+                result_r = 3.0
+                exit_price = tp
+                exit_time = future["time"]
+                break
+
+        else:
+
+            future = data.iloc[
+                end - 1
+            ]
+
+            exit_price = float(
+                future["close"]
+            )
+
+            exit_time = future["time"]
+
+            if direction == "BUY":
+
+                raw_r = (
+                    exit_price - entry
+                ) / atr
+
+            else:
+
+                raw_r = (
+                    entry - exit_price
+                ) / atr
+
+            raw_r = max(
+                -1.0,
+                min(3.0, raw_r)
+            )
+
+            result_r = raw_r
+
+            if result_r > 0:
+                result = "PARTIAL WIN"
+
+            elif result_r < 0:
+                result = "PARTIAL LOSS"
+
+            else:
+                result = "BREAKEVEN"
+
+        net_r = result_r - cost_r
+
+        equity += net_r
+
+        if net_r > 0:
+            wins += 1
+
+        peak = max(
+            peak,
+            equity
+        )
+
+        drawdown = (
+            equity - peak
+        )
+
+        max_drawdown = min(
+            max_drawdown,
+            drawdown
+        )
+
+        journal.append(
+            {
+                "Entry Time": row["time"],
+                "Exit Time": exit_time,
+                "Direction": direction,
+                "Score": int(score),
+                "H1 Trend": h1_trend,
+                "H4 Trend": h4_trend,
+                "Entry": round(entry, 2),
+                "SL": round(sl, 2),
+                "TP": round(tp, 2),
+                "Exit": round(exit_price, 2),
+                "Bars Held": bars_held,
+                "Result": result,
+                "Net R": round(net_r, 2)
+            }
+        )
+
+        i = max(
+            i + 1,
+            i + bars_held
+        )
+
+    total_trades = len(
+        journal
+    )
+
+    win_rate = (
+        wins / total_trades * 100
+        if total_trades > 0
+        else 0
+    )
+
+    gross_profit = sum(
+        max(0, x["Net R"])
+        for x in journal
+    )
+
+    gross_loss = abs(
+        sum(
+            min(0, x["Net R"])
+            for x in journal
+        )
+    )
+
+    if gross_loss > 0:
+
+        profit_factor = (
+            gross_profit /
+            gross_loss
+        )
+
+    else:
+
+        profit_factor = 0
+
+    expectancy = (
+        equity / total_trades
+        if total_trades > 0
+        else 0
+    )
+
+    return {
+        "trades": total_trades,
+        "win_rate": win_rate,
+        "net_r": equity,
+        "profit_factor": profit_factor,
+        "max_drawdown": max_drawdown,
+        "expectancy": expectancy,
+        "journal": pd.DataFrame(journal)
+    }
