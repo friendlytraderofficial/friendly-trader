@@ -283,4 +283,5 @@ st.subheader(
     "📡 Market Data"
 )
 
-d1, d2, d3, d4 = st
+d1, d2, d3, d4 = st.columns(4)
+
