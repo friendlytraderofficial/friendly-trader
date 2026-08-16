@@ -54,7 +54,7 @@ def get_xauusd_data():
     params = {
         "symbol": "XAU/USD",
         "interval": "15min",
-        "outputsize": 500,
+        "outputsize": 5000,
         "apikey": api_key
     }
 
