@@ -7,7 +7,7 @@ from strategy import generate_signal, backtest
 
 
 # =========================================================
-# PAGE CONFIG
+# PAGE
 # =========================================================
 
 st.set_page_config(
@@ -15,31 +15,6 @@ st.set_page_config(
     page_icon="📈",
     layout="wide"
 )
-
-
-# =========================================================
-# STYLE
-# =========================================================
-
-st.markdown(
-    """
-    <style>
-    .main {
-        background-color: #080b14;
-    }
-
-    .block-container {
-        padding-top: 1.2rem;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-
-# =========================================================
-# HEADER
-# =========================================================
 
 st.title("Friendly Trader")
 
@@ -49,7 +24,7 @@ st.caption(
 
 
 # =========================================================
-# TWELVE DATA FUNCTION
+# TWELVE DATA
 # =========================================================
 
 @st.cache_data(ttl=60)
@@ -74,19 +49,16 @@ def get_xauusd_data(interval, outputsize):
 
     response.raise_for_status()
 
-    data = response.json()
+    result = response.json()
 
-    if "values" not in data:
-
+    if "values" not in result:
         raise RuntimeError(
-            f"Twelve Data error: {data}"
+            f"Twelve Data error: {result}"
         )
 
-    df = pd.DataFrame(
-        data["values"]
-    )
+    df = pd.DataFrame(result["values"])
 
-    df["datetime"] = pd.to_datetime(
+    df["time"] = pd.to_datetime(
         df["datetime"]
     )
 
@@ -96,33 +68,36 @@ def get_xauusd_data(interval, outputsize):
         "low",
         "close"
     ]:
-
         df[column] = pd.to_numeric(
             df[column],
             errors="coerce"
         )
 
+    df = df[
+        [
+            "time",
+            "open",
+            "high",
+            "low",
+            "close"
+        ]
+    ]
+
     df = df.dropna()
 
     df = df.sort_values(
-        "datetime"
+        "time"
     )
 
     df = df.reset_index(
         drop=True
     )
 
-    df = df.rename(
-        columns={
-            "datetime": "time"
-        }
-    )
-
     return df
 
 
 # =========================================================
-# LOAD MARKET DATA
+# LOAD DATA
 # =========================================================
 
 try:
@@ -145,40 +120,11 @@ try:
 except Exception as e:
 
     st.error(
-        "Unable to load XAU/USD market data."
+        "Market data loading failed."
     )
 
     st.code(
         str(e)
-    )
-
-    st.stop()
-
-
-# =========================================================
-# DATA VALIDATION
-# =========================================================
-
-if len(df_15m) < 200:
-
-    st.error(
-        "Not enough 15-minute data."
-    )
-
-    st.stop()
-
-if len(df_1h) < 200:
-
-    st.error(
-        "Not enough 1-hour data."
-    )
-
-    st.stop()
-
-if len(df_4h) < 200:
-
-    st.error(
-        "Not enough 4-hour data."
     )
 
     st.stop()
@@ -197,7 +143,7 @@ st.success(
 
 
 # =========================================================
-# GENERATE CURRENT SIGNAL
+# SIGNAL
 # =========================================================
 
 try:
@@ -227,24 +173,20 @@ except Exception as e:
 
 c1, c2, c3, c4 = st.columns(4)
 
-
 c1.metric(
     "XAUUSD",
     f"${df_15m['close'].iloc[-1]:,.2f}"
 )
-
 
 c2.metric(
     "Signal",
     signal["direction"]
 )
 
-
 c3.metric(
     "Score",
     f"{signal['score']}/10"
 )
-
 
 c4.metric(
     "Risk / Reward",
@@ -271,11 +213,242 @@ with left:
         "📊 XAUUSD 15-Minute Market Chart"
     )
 
-    chart_data = df_15m.tail(
-        250
-    )
+    chart_data = df_15m.tail(250)
 
     fig = go.Figure()
 
     fig.add_trace(
-        go.Cand
+        go.Candlestick(
+            x=chart_data["time"],
+            open=chart_data["open"],
+            high=chart_data["high"],
+            low=chart_data["low"],
+            close=chart_data["close"],
+            name="XAUUSD"
+        )
+    )
+
+    fig.update_layout(
+        template="plotly_dark",
+        height=520,
+        xaxis_rangeslider_visible=False
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
+
+
+# =========================================================
+# SIGNAL PANEL
+# =========================================================
+
+with right:
+
+    st.subheader(
+        "🚨 Latest Signal"
+    )
+
+    st.markdown(
+        f"## {signal['direction']}"
+    )
+
+    st.write(
+        f"**Entry:** {signal['entry']}"
+    )
+
+    st.write(
+        f"**Stop Loss:** {signal['sl']}"
+    )
+
+    st.write(
+        f"**Take Profit:** {signal['tp']}"
+    )
+
+    score = max(
+        0,
+        min(
+            10,
+            signal["score"]
+        )
+    )
+
+    st.progress(
+        score / 10
+    )
+
+    st.write(
+        f"**Setup Score:** {score}/10"
+    )
+
+    st.write(
+        f"**1H Trend:** "
+        f"{signal.get('h1_trend', 'N/A')}"
+    )
+
+    st.write(
+        f"**4H Trend:** "
+        f"{signal.get('h4_trend', 'N/A')}"
+    )
+
+    if signal["direction"] == "WAIT":
+
+        st.warning(
+            "Weak setup — wait for confirmation."
+        )
+
+    else:
+
+        st.info(
+            "Research signal only. "
+            "Real-money execution is disabled."
+        )
+
+
+# =========================================================
+# MARKET DATA
+# =========================================================
+
+st.divider()
+
+st.subheader(
+    "📡 Market Data"
+)
+
+d1, d2, d3, d4 = st.columns(4)
+
+d1.metric(
+    "15M Candles",
+    len(df_15m)
+)
+
+d2.metric(
+    "1H Candles",
+    len(df_1h)
+)
+
+d3.metric(
+    "4H Candles",
+    len(df_4h)
+)
+
+d4.metric(
+    "Data Source",
+    "Twelve Data"
+)
+
+
+# =========================================================
+# BACKTEST
+# =========================================================
+
+st.divider()
+
+st.subheader(
+    "🧪 50-Trade Research Backtest"
+)
+
+try:
+
+    results = backtest(
+        df_15m,
+        df_1h,
+        df_4h,
+        trades=50
+    )
+
+except Exception as e:
+
+    st.error(
+        "Backtest failed."
+    )
+
+    st.code(
+        str(e)
+    )
+
+    st.stop()
+
+
+# =========================================================
+# BACKTEST RESULTS
+# =========================================================
+
+m1, m2, m3, m4, m5 = st.columns(5)
+
+m1.metric(
+    "Trades",
+    results["trades"]
+)
+
+m2.metric(
+    "Win Rate",
+    f"{results['win_rate']:.1f}%"
+)
+
+m3.metric(
+    "Net R",
+    f"{results['net_r']:.2f}R"
+)
+
+m4.metric(
+    "Profit Factor",
+    f"{results['profit_factor']:.2f}"
+)
+
+m5.metric(
+    "Max Drawdown",
+    f"{results['max_drawdown']:.2f}R"
+)
+
+
+# =========================================================
+# EXPECTANCY
+# =========================================================
+
+if "expectancy" in results:
+
+    st.metric(
+        "Expectancy / Trade",
+        f"{results['expectancy']:.3f}R"
+    )
+
+
+# =========================================================
+# TRADE JOURNAL
+# =========================================================
+
+st.subheader(
+    "📒 Trade Journal"
+)
+
+journal = results.get(
+    "journal"
+)
+
+if journal is not None and len(journal) > 0:
+
+    st.dataframe(
+        journal,
+        use_container_width=True,
+        hide_index=True
+    )
+
+else:
+
+    st.info(
+        "No qualifying trades were found."
+    )
+
+
+# =========================================================
+# FOOTER
+# =========================================================
+
+st.caption(
+    "Alpha 0.6 uses real XAU/USD market data "
+    "with 15M + 1H + 4H confirmation. "
+    "Backtest results are research results only "
+    "and should not be treated as proof of future performance."
+    )
