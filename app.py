@@ -1,30 +1,38 @@
 import streamlit as st
 import pandas as pd
+import plotly.graph_objects as go
 import requests
 
+from strategy import generate_signal
+
+
 st.set_page_config(
-    page_title="Friendly Trader Test",
-    page_icon="📈"
+    page_title="Friendly Trader",
+    page_icon="📈",
+    layout="wide"
 )
+
 
 st.title("Friendly Trader")
 
-st.success("App is running successfully.")
+st.caption(
+    "Trade Smart. Trade Friendly. — Alpha 0.7"
+)
 
-api_key = st.secrets["TWELVE_DATA_API_KEY"]
 
-st.write("Testing Twelve Data...")
+@st.cache_data(ttl=60)
+def get_data(interval, outputsize):
 
-url = "https://api.twelvedata.com/time_series"
+    api_key = st.secrets["TWELVE_DATA_API_KEY"]
 
-params = {
-    "symbol": "XAU/USD",
-    "interval": "15min",
-    "outputsize": 100,
-    "apikey": api_key
-}
+    url = "https://api.twelvedata.com/time_series"
 
-try:
+    params = {
+        "symbol": "XAU/USD",
+        "interval": interval,
+        "outputsize": outputsize,
+        "apikey": api_key
+    }
 
     response = requests.get(
         url,
@@ -32,59 +40,277 @@ try:
         timeout=20
     )
 
-    st.write(
-        "HTTP Status:",
-        response.status_code
-    )
+    response.raise_for_status()
 
     data = response.json()
 
     if "values" not in data:
+        raise RuntimeError(data)
 
-        st.error("Twelve Data did not return candles.")
+    df = pd.DataFrame(data["values"])
 
-        st.json(data)
+    df["time"] = pd.to_datetime(
+        df["datetime"]
+    )
+
+    for col in [
+        "open",
+        "high",
+        "low",
+        "close"
+    ]:
+
+        df[col] = pd.to_numeric(
+            df[col],
+            errors="coerce"
+        )
+
+    df = df[
+        [
+            "time",
+            "open",
+            "high",
+            "low",
+            "close"
+        ]
+    ]
+
+    df = df.dropna()
+
+    df = df.sort_values(
+        "time"
+    )
+
+    return df.reset_index(
+        drop=True
+    )
+
+
+# ---------------------------------------------------------
+# LOAD DATA
+# ---------------------------------------------------------
+
+with st.spinner("Loading XAU/USD market data..."):
+
+    try:
+
+        df_15m = get_data(
+            "15min",
+            500
+        )
+
+        df_1h = get_data(
+            "1h",
+            500
+        )
+
+        df_4h = get_data(
+            "4h",
+            500
+        )
+
+    except Exception as e:
+
+        st.error(
+            "Market data error"
+        )
+
+        st.exception(e)
 
         st.stop()
 
-    df = pd.DataFrame(
-        data["values"]
-    )
 
-    st.success(
-        f"Successfully loaded {len(df)} candles."
-    )
+st.success(
+    f"Real data loaded: "
+    f"{len(df_15m)} × 15M | "
+    f"{len(df_1h)} × 1H | "
+    f"{len(df_4h)} × 4H"
+)
 
-    st.subheader(
-        "Latest XAU/USD Data"
-    )
 
-    st.dataframe(
-        df.head(10),
-        use_container_width=True
+# ---------------------------------------------------------
+# SIGNAL
+# ---------------------------------------------------------
+
+try:
+
+    signal = generate_signal(
+        df_15m,
+        df_1h,
+        df_4h
     )
 
 except Exception as e:
 
     st.error(
-        "Data test failed."
+        "Signal generation error"
     )
 
     st.exception(e)
 
+    st.stop()
+
+
+# ---------------------------------------------------------
+# METRICS
+# ---------------------------------------------------------
+
+c1, c2, c3, c4 = st.columns(4)
+
+
+c1.metric(
+    "XAUUSD",
+    f"${df_15m['close'].iloc[-1]:,.2f}"
+)
+
+
+c2.metric(
+    "Signal",
+    signal["direction"]
+)
+
+
+c3.metric(
+    "Score",
+    f"{signal['score']}/10"
+)
+
+
+c4.metric(
+    "Risk / Reward",
+    "1:3"
+)
+
+
+# ---------------------------------------------------------
+# CHART
+# ---------------------------------------------------------
+
+left, right = st.columns(
+    [2.2, 1]
+)
+
+
+with left:
+
+    st.subheader(
+        "📊 XAUUSD 15-Minute Chart"
+    )
+
+    chart = df_15m.tail(200)
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Candlestick(
+            x=chart["time"],
+            open=chart["open"],
+            high=chart["high"],
+            low=chart["low"],
+            close=chart["close"],
+            name="XAUUSD"
+        )
+    )
+
+    fig.update_layout(
+        template="plotly_dark",
+        height=520,
+        xaxis_rangeslider_visible=False
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
+
+
+# ---------------------------------------------------------
+# SIGNAL PANEL
+# ---------------------------------------------------------
+
+with right:
+
+    st.subheader(
+        "🚨 Latest Signal"
+    )
+
+    st.markdown(
+        f"## {signal['direction']}"
+    )
+
+    st.write(
+        f"**Entry:** {signal['entry']}"
+    )
+
+    st.write(
+        f"**Stop Loss:** {signal['sl']}"
+    )
+
+    st.write(
+        f"**Take Profit:** {signal['tp']}"
+    )
+
+    st.progress(
+        signal["score"] / 10
+    )
+
+    st.write(
+        f"**Setup Score:** "
+        f"{signal['score']}/10"
+    )
+
+    st.write(
+        f"**1H Trend:** "
+        f"{signal.get('h1_trend', 'N/A')}"
+    )
+
+    st.write(
+        f"**4H Trend:** "
+        f"{signal.get('h4_trend', 'N/A')}"
+    )
+
+
+# ---------------------------------------------------------
+# DATA INFORMATION
+# ---------------------------------------------------------
 
 st.divider()
 
 st.subheader(
-    "Backtest Diagnostic"
+    "📡 Market Data"
 )
+
+
+d1, d2, d3, d4 = st.columns(4)
+
+
+d1.metric(
+    "15M Candles",
+    len(df_15m)
+)
+
+
+d2.metric(
+    "1H Candles",
+    len(df_1h)
+)
+
+
+d3.metric(
+    "4H Candles",
+    len(df_4h)
+)
+
+
+d4.metric(
+    "Source",
+    "Twelve Data"
+)
+
+
+st.divider()
 
 st.info(
-    "If you can see this message, "
-    "the problem is specifically inside "
-    "the strategy/backtest code."
-)
-
-st.success(
-    "Diagnostic page loaded completely."
-)
+    "Alpha 0.7 is currently a research prototype. "
+    "Real-money execution is disabled."
+    )
