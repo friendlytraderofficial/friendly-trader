@@ -5,10 +5,10 @@ import requests
 import plotly.graph_objects as go
 
 from strategy import generate_signal
-st.write("DEBUG: Alpha 0.9 strategy loaded")
+
 
 # =========================================================
-# PAGE CONFIG
+# PAGE
 # =========================================================
 
 st.set_page_config(
@@ -20,20 +20,25 @@ st.set_page_config(
 st.title("Friendly Trader")
 
 st.caption(
-    "Trade Smart. Trade Friendly. — Alpha 0.8 Research Prototype"
+    "Trade Smart. Trade Friendly. — Alpha 0.9 Research Prototype"
 )
 
 
 # =========================================================
-# MARKET DATA
+# TWELVE DATA
 # =========================================================
 
 @st.cache_data(ttl=60)
 def get_market_data(interval, outputsize):
 
-    api_key = st.secrets["TWELVE_DATA_API_KEY"]
+    api_key = st.secrets[
+        "TWELVE_DATA_API_KEY"
+    ]
 
-    url = "https://api.twelvedata.com/time_series"
+    url = (
+        "https://api.twelvedata.com/"
+        "time_series"
+    )
 
     params = {
         "symbol": "XAU/USD",
@@ -57,7 +62,7 @@ def get_market_data(interval, outputsize):
         raise RuntimeError(
             result.get(
                 "message",
-                "Twelve Data returned no values."
+                "Twelve Data returned no data."
             )
         )
 
@@ -103,7 +108,7 @@ def get_market_data(interval, outputsize):
 
 
 # =========================================================
-# LOAD DATA
+# LOAD MARKET DATA
 # =========================================================
 
 try:
@@ -130,7 +135,7 @@ try:
 except Exception as error:
 
     st.error(
-        "Unable to load market data."
+        "Market data loading failed."
     )
 
     st.exception(error)
@@ -147,16 +152,26 @@ st.success(
 
 
 # =========================================================
-# CURRENT SIGNAL
+# SIGNAL
 # =========================================================
 
 try:
 
-    signal = generate_signal(
+    result = generate_signal(
         df_15m,
         df_1h,
         df_4h
     )
+
+except TypeError:
+
+    st.error(
+        "The generate_signal() function "
+        "in strategy.py does not match "
+        "the expected Alpha 0.9 format."
+    )
+
+    st.stop()
 
 except Exception as error:
 
@@ -170,27 +185,97 @@ except Exception as error:
 
 
 # =========================================================
+# NORMALIZE SIGNAL
+# =========================================================
+
+direction = result.get(
+    "direction",
+    "WAIT"
+)
+
+score = int(
+    result.get(
+        "score",
+        0
+    )
+)
+
+entry = float(
+    result.get(
+        "entry",
+        df_15m["close"].iloc[-1]
+    )
+)
+
+sl = float(
+    result.get(
+        "sl",
+        entry
+    )
+)
+
+tp = float(
+    result.get(
+        "tp",
+        entry
+    )
+)
+
+h1_trend = result.get(
+    "h1_trend",
+    "NEUTRAL"
+)
+
+h4_trend = result.get(
+    "h4_trend",
+    "NEUTRAL"
+)
+
+
+# =========================================================
+# DISPLAY SCORE
+# =========================================================
+
+# Alpha 0.9 strategy currently has
+# a maximum raw score of 8.
+#
+# Convert it to a 10-point display
+# without changing the actual decision.
+#
+# 8 raw -> 10 display
+# 7 raw -> 8.75 display
+# etc.
+
+display_score = min(
+    10,
+    round(
+        score * 10 / 8
+    )
+)
+
+
+# =========================================================
 # TOP METRICS
 # =========================================================
 
-c1, c2, c3, c4 = st.columns(4)
+m1, m2, m3, m4 = st.columns(4)
 
-c1.metric(
+m1.metric(
     "XAUUSD",
     f"${df_15m['close'].iloc[-1]:,.2f}"
 )
 
-c2.metric(
+m2.metric(
     "Signal",
-    signal["direction"]
+    direction
 )
 
-c3.metric(
+m3.metric(
     "Score",
-    f"{signal['score']}/10"
+    f"{display_score}/10"
 )
 
-c4.metric(
+m4.metric(
     "Risk / Reward",
     "1:3"
 )
@@ -204,17 +289,17 @@ st.subheader(
     "📊 XAUUSD 15-Minute Chart"
 )
 
-chart_data = df_15m.tail(200)
+chart_df = df_15m.tail(200)
 
 fig = go.Figure()
 
 fig.add_trace(
     go.Candlestick(
-        x=chart_data["time"],
-        open=chart_data["open"],
-        high=chart_data["high"],
-        low=chart_data["low"],
-        close=chart_data["close"],
+        x=chart_df["time"],
+        open=chart_df["open"],
+        high=chart_df["high"],
+        low=chart_df["low"],
+        close=chart_df["close"],
         name="XAUUSD"
     )
 )
@@ -231,7 +316,7 @@ st.plotly_chart(
 
 
 # =========================================================
-# SIGNAL
+# LATEST SIGNAL
 # =========================================================
 
 st.subheader(
@@ -239,45 +324,49 @@ st.subheader(
 )
 
 st.markdown(
-    f"## {signal['direction']}"
+    f"## {direction}"
 )
 
-s1, s2, s3 = st.columns(3)
 
-s1.metric(
+p1, p2, p3 = st.columns(3)
+
+p1.metric(
     "Entry",
-    f"{signal['entry']:.2f}"
+    f"{entry:.2f}"
 )
 
-s2.metric(
+p2.metric(
     "Stop Loss",
-    f"{signal['sl']:.2f}"
+    f"{sl:.2f}"
 )
 
-s3.metric(
+p3.metric(
     "Take Profit",
-    f"{signal['tp']:.2f}"
+    f"{tp:.2f}"
 )
+
 
 st.write(
     f"**Setup Score:** "
-    f"{signal['score']}/10"
+    f"{display_score}/10"
 )
 
 st.write(
     f"**1H Trend:** "
-    f"{signal.get('h1_trend', 'N/A')}"
+    f"{h1_trend}"
 )
 
 st.write(
     f"**4H Trend:** "
-    f"{signal.get('h4_trend', 'N/A')}"
+    f"{h4_trend}"
 )
 
-if signal["direction"] == "WAIT":
+
+if direction == "WAIT":
 
     st.warning(
-        "Weak setup — wait for confirmation."
+        "No high-quality setup currently. "
+        "Wait for confirmation."
     )
 
 else:
@@ -322,7 +411,7 @@ d4.metric(
 
 
 # =========================================================
-# FAST BACKTEST
+# SIMPLE RESEARCH BACKTEST
 # =========================================================
 
 st.divider()
@@ -332,9 +421,9 @@ st.subheader(
 )
 
 
-def add_backtest_indicators(df):
+def calculate_backtest():
 
-    data = df.copy()
+    data = df_15m.copy()
 
     data = data.sort_values(
         "time"
@@ -381,15 +470,13 @@ def add_backtest_indicators(df):
         upper=0
     )
 
-    avg_gain = (
-        gain.rolling(14)
-        .mean()
-    )
+    avg_gain = gain.rolling(
+        14
+    ).mean()
 
-    avg_loss = (
-        loss.rolling(14)
-        .mean()
-    )
+    avg_loss = loss.rolling(
+        14
+    ).mean()
 
     rs = (
         avg_gain /
@@ -401,7 +488,7 @@ def add_backtest_indicators(df):
 
     data["rsi"] = (
         100 -
-        (100 / (1 + rs))
+        100 / (1 + rs)
     )
 
     previous_close = (
@@ -423,89 +510,27 @@ def add_backtest_indicators(df):
         previous_close
     ).abs()
 
-    data["tr"] = pd.concat(
+    data["atr"] = pd.concat(
         [
             tr1,
             tr2,
             tr3
         ],
         axis=1
-    ).max(axis=1)
+    ).max(axis=1).rolling(
+        14
+    ).mean()
 
-    data["atr"] = (
-        data["tr"]
-        .rolling(14)
-        .mean()
-    )
-
-    return data
-
-
-def get_trend_at_time(
-    trend_df,
-    current_time
-):
-
-    available = trend_df[
-        trend_df["time"] <= current_time
-    ]
-
-    if available.empty:
-
-        return "NEUTRAL"
-
-    row = available.iloc[-1]
-
-    if (
-        row["ema20"] >
-        row["ema50"] >
-        row["ema200"]
-    ):
-
-        return "BULLISH"
-
-    if (
-        row["ema20"] <
-        row["ema50"] <
-        row["ema200"]
-    ):
-
-        return "BEARISH"
-
-    return "NEUTRAL"
-
-
-def run_fast_backtest(
-    df_15m,
-    df_1h,
-    df_4h
-):
-
-    data = add_backtest_indicators(
-        df_15m
-    ).dropna()
-
-    h1 = add_backtest_indicators(
-        df_1h
-    ).dropna()
-
-    h4 = add_backtest_indicators(
-        df_4h
-    ).dropna()
+    data = data.dropna()
 
     trades = []
 
     equity = 0.0
     peak = 0.0
-    max_drawdown = 0.0
-
-    start_index = max(
-        200,
-        0
-    )
+    max_dd = 0.0
 
     for i in range(
-        start_index,
+        1,
         len(data) - 20
     ):
 
@@ -525,127 +550,81 @@ def run_fast_backtest(
         if not np.isfinite(atr):
             continue
 
-        if atr <= 0:
-            continue
+        buy = 0
+        sell = 0
 
-        current_time = row["time"]
-
-        h1_trend = get_trend_at_time(
-            h1,
-            current_time
-        )
-
-        h4_trend = get_trend_at_time(
-            h4,
-            current_time
-        )
-
-        buy_score = 0
-        sell_score = 0
-
-        # EMA 20 / 50
-        if row["ema20"] > row["ema50"]:
-
-            buy_score += 2
-
-        elif row["ema20"] < row["ema50"]:
-
-            sell_score += 2
-
-        # EMA 200
-        if price > row["ema200"]:
-
-            buy_score += 2
-
-        elif price < row["ema200"]:
-
-            sell_score += 2
-
-        # RSI
         if (
-            55 <= row["rsi"] <= 70
+            row["ema20"] >
+            row["ema50"] >
+            row["ema200"]
         ):
 
-            buy_score += 2
+            buy += 2
 
-        elif (
-            30 <= row["rsi"] <= 45
-        ):
-
-            sell_score += 2
-
-        # 1H
-        if h1_trend == "BULLISH":
-
-            buy_score += 2
-
-        elif h1_trend == "BEARISH":
-
-            sell_score += 2
-
-        # 4H
-        if h4_trend == "BULLISH":
-
-            buy_score += 2
-
-        elif h4_trend == "BEARISH":
-
-            sell_score += 2
-
-        # Signal
         if (
-            buy_score >= 8
-            and buy_score > sell_score
+            row["ema20"] <
+            row["ema50"] <
+            row["ema200"]
         ):
 
-            direction = "BUY"
+            sell += 2
 
-        elif (
-            sell_score >= 8
-            and sell_score > buy_score
+        if (
+            52 <= row["rsi"] <= 65
         ):
 
-            direction = "SELL"
+            buy += 2
+
+        if (
+            35 <= row["rsi"] <= 48
+        ):
+
+            sell += 2
+
+        ema_distance = (
+            abs(
+                price -
+                row["ema20"]
+            ) /
+            price
+        ) * 100
+
+        if ema_distance <= 0.15:
+
+            if price > row["ema20"]:
+
+                buy += 2
+
+            elif price < row["ema20"]:
+
+                sell += 2
+
+        if buy >= 6 and buy > sell:
+
+            direction_bt = "BUY"
+
+        elif sell >= 6 and sell > buy:
+
+            direction_bt = "SELL"
 
         else:
 
             continue
 
-        # ATR risk model
-        stop_distance = (
-            atr * 1.5
-        )
+        risk = atr * 1.5
+        reward = risk * 3
 
-        target_distance = (
-            stop_distance * 3
-        )
+        if direction_bt == "BUY":
 
-        if direction == "BUY":
-
-            stop_loss = (
-                price -
-                stop_distance
-            )
-
-            take_profit = (
-                price +
-                target_distance
-            )
+            stop = price - risk
+            target = price + reward
 
         else:
 
-            stop_loss = (
-                price +
-                stop_distance
-            )
-
-            take_profit = (
-                price -
-                target_distance
-            )
+            stop = price + risk
+            target = price - reward
 
         result_r = None
-        exit_price = None
 
         for j in range(
             i + 1,
@@ -655,35 +634,171 @@ def run_fast_backtest(
             )
         ):
 
-            future = data.iloc[j]
+            candle = data.iloc[j]
 
             high = float(
-                future["high"]
+                candle["high"]
             )
 
             low = float(
-                future["low"]
+                candle["low"]
             )
 
-            if direction == "BUY":
+            if direction_bt == "BUY":
 
-                if low <= stop_loss:
+                if low <= stop:
 
-                    result_r = -1.0
-                    exit_price = stop_loss
-
+                    result_r = -1
                     break
 
-                if high >= take_profit:
+                if high >= target:
 
-                    result_r = 3.0
-                    exit_price = take_profit
-
+                    result_r = 3
                     break
 
             else:
 
-                if high >= stop_loss:
+                if high >= stop:
 
-                    result_r = -1.0
-                   
+                    result_r = -1
+                    break
+
+                if low <= target:
+
+                    result_r = 3
+                    break
+
+        if result_r is None:
+
+            continue
+
+        equity += result_r
+
+        peak = max(
+            peak,
+            equity
+        )
+
+        max_dd = min(
+            max_dd,
+            equity - peak
+        )
+
+        trades.append(
+            result_r
+        )
+
+    if not trades:
+
+        return {
+            "trades": 0,
+            "win_rate": 0,
+            "net_r": 0,
+            "profit_factor": 0,
+            "max_dd": 0
+        }
+
+    wins = sum(
+        1
+        for x in trades
+        if x > 0
+    )
+
+    losses = sum(
+        1
+        for x in trades
+        if x < 0
+    )
+
+    gross_profit = sum(
+        x for x in trades
+        if x > 0
+    )
+
+    gross_loss = abs(
+        sum(
+            x for x in trades
+            if x < 0
+        )
+    )
+
+    if gross_loss > 0:
+
+        pf = (
+            gross_profit /
+            gross_loss
+        )
+
+    else:
+
+        pf = 0
+
+    return {
+        "trades": len(trades),
+        "win_rate": (
+            wins /
+            len(trades)
+        ) * 100,
+        "net_r": sum(trades),
+        "profit_factor": pf,
+        "max_dd": max_dd
+    }
+
+
+try:
+
+    with st.spinner(
+        "Running backtest..."
+    ):
+
+        bt = calculate_backtest()
+
+    r1, r2, r3, r4, r5 = st.columns(5)
+
+    r1.metric(
+        "Trades",
+        bt["trades"]
+    )
+
+    r2.metric(
+        "Win Rate",
+        f"{bt['win_rate']:.1f}%"
+    )
+
+    r3.metric(
+        "Net R",
+        f"{bt['net_r']:.2f}R"
+    )
+
+    r4.metric(
+        "Profit Factor",
+        f"{bt['profit_factor']:.2f}"
+    )
+
+    r5.metric(
+        "Max Drawdown",
+        f"{bt['max_dd']:.2f}R"
+    )
+
+except Exception as error:
+
+    st.error(
+        "Backtest failed."
+    )
+
+    st.exception(error)
+
+
+# =========================================================
+# FOOTER
+# =========================================================
+
+st.divider()
+
+st.caption(
+    "Alpha 0.9 is a research prototype. "
+    "Market data comes from Twelve Data. "
+    "Backtest results are research results only "
+    "and are not proof of future performance. "
+    "Real-money execution is disabled."
+    )
