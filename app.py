@@ -19,21 +19,18 @@ st.set_page_config(
 st.title("Friendly Trader")
 
 st.caption(
-    "Trade Smart. Trade Friendly. — "
-    "Alpha 1.1 Research Prototype"
+    "Trade Smart. Trade Friendly. — Alpha 1.1 Research Prototype"
 )
 
 
 # =========================================================
-# DATA
+# MARKET DATA
 # =========================================================
 
 @st.cache_data(ttl=60)
 def get_market_data(interval, outputsize):
 
-    api_key = st.secrets[
-        "TWELVE_DATA_API_KEY"
-    ]
+    api_key = st.secrets["TWELVE_DATA_API_KEY"]
 
     response = requests.get(
         "https://api.twelvedata.com/time_series",
@@ -51,7 +48,6 @@ def get_market_data(interval, outputsize):
     result = response.json()
 
     if "values" not in result:
-
         raise RuntimeError(
             result.get(
                 "message",
@@ -59,23 +55,20 @@ def get_market_data(interval, outputsize):
             )
         )
 
-    df = pd.DataFrame(
-        result["values"]
-    )
+    df = pd.DataFrame(result["values"])
 
     df["time"] = pd.to_datetime(
         df["datetime"]
     )
 
-    for col in [
+    for column in [
         "open",
         "high",
         "low",
         "close"
     ]:
-
-        df[col] = pd.to_numeric(
-            df[col],
+        df[column] = pd.to_numeric(
+            df[column],
             errors="coerce"
         )
 
@@ -144,7 +137,7 @@ st.success(
 
 
 # =========================================================
-# LIVE SIGNAL
+# SIGNAL
 # =========================================================
 
 try:
@@ -166,76 +159,21 @@ except Exception as error:
     st.stop()
 
 
-direction = signal.get(
-    "direction",
-    "WAIT"
-)
+direction = signal["direction"]
+score = signal["score"]
+entry = signal["entry"]
+sl = signal["sl"]
+tp = signal["tp"]
 
-score = int(
-    signal.get(
-        "score",
-        0
-    )
-)
+buy_score = signal["buy_score"]
+sell_score = signal["sell_score"]
 
-entry = float(
-    signal.get(
-        "entry",
-        df_15m["close"].iloc[-1]
-    )
-)
+h1_trend = signal["h1_trend"]
+h4_trend = signal["h4_trend"]
 
-sl = float(
-    signal.get(
-        "sl",
-        entry
-    )
-)
-
-tp = float(
-    signal.get(
-        "tp",
-        entry
-    )
-)
-
-buy_score = float(
-    signal.get(
-        "buy_score",
-        0
-    )
-)
-
-sell_score = float(
-    signal.get(
-        "sell_score",
-        0
-    )
-)
-
-h1_trend = signal.get(
-    "h1_trend",
-    "NEUTRAL"
-)
-
-h4_trend = signal.get(
-    "h4_trend",
-    "NEUTRAL"
-)
-
-rsi = float(
-    signal.get(
-        "rsi",
-        50
-    )
-)
-
-atr = float(
-    signal.get(
-        "atr",
-        0
-    )
-)
+rsi = signal["rsi"]
+atr = signal["atr"]
+momentum = signal["momentum"]
 
 
 # =========================================================
@@ -333,19 +271,23 @@ st.write(
 )
 
 st.write(
-    f"**BUY Score:** {buy_score:.2f}/10"
+    f"**BUY Score:** {buy_score}/10"
 )
 
 st.write(
-    f"**SELL Score:** {sell_score:.2f}/10"
+    f"**SELL Score:** {sell_score}/10"
 )
 
 st.write(
-    f"**RSI:** {rsi:.2f}"
+    f"**RSI:** {rsi}"
 )
 
 st.write(
-    f"**ATR:** {atr:.2f}"
+    f"**ATR:** {atr}"
+)
+
+st.write(
+    f"**Momentum:** {momentum}%"
 )
 
 st.write(
@@ -361,7 +303,7 @@ if direction == "WAIT":
 
     st.warning(
         "No sufficiently strong setup. "
-        "Waiting for confirmation."
+        "Friendly Trader recommends waiting."
     )
 
 else:
@@ -424,33 +366,15 @@ def run_backtest(
 
     results = []
 
-    # -----------------------------------------------------
-    # Maximum number of future candles used for a trade.
-    #
-    # 20 × 15 minutes = 5 hours.
-    # -----------------------------------------------------
-
+    minimum_candles = 120
     horizon = 20
 
-    # Need enough candles for the indicator engine.
-    minimum_15m = 220
-
     last_index = (
-        len(df_15m) -
-        horizon
+        len(df_15m) - horizon
     )
 
-    if last_index <= minimum_15m:
-
-        return results
-
-
-    # -----------------------------------------------------
-    # Process historical signals
-    # -----------------------------------------------------
-
     for i in range(
-        minimum_15m,
+        minimum_candles,
         last_index
     ):
 
@@ -464,139 +388,62 @@ def run_backtest(
             current_15m["time"].iloc[-1]
         )
 
-
-        # -------------------------------------------------
-        # IMPORTANT:
-        #
-        # Only use higher-timeframe candles that have
-        # already CLOSED before this signal.
-        #
-        # This prevents using information from an
-        # unfinished 1H/4H candle.
-        # -------------------------------------------------
-
         current_1h = (
             df_1h[
-                df_1h["time"] <
-                current_time.floor("1h")
+                df_1h["time"] <= current_time
             ]
             .copy()
         )
 
         current_4h = (
             df_4h[
-                df_4h["time"] <
-                current_time.floor("4h")
+                df_4h["time"] <= current_time
             ]
             .copy()
         )
 
-
-        # The strategy itself needs enough data.
-        if len(current_1h) < 50:
-
+        if len(current_1h) < 120:
             continue
 
-        if len(current_4h) < 50:
-
+        if len(current_4h) < 120:
             continue
-
-
-        # -------------------------------------------------
-        # Generate historical signal
-        # -------------------------------------------------
 
         try:
 
-            historical_signal = (
-                generate_signal(
-                    current_15m,
-                    current_1h,
-                    current_4h
-                )
+            s = generate_signal(
+                current_15m,
+                current_1h,
+                current_4h
             )
 
         except Exception:
 
             continue
 
+        bt_direction = s["direction"]
 
-        historical_direction = (
-            historical_signal.get(
-                "direction",
-                "WAIT"
-            )
-        )
-
-
-        # Ignore WAIT signals.
-        if historical_direction == "WAIT":
-
+        if bt_direction == "WAIT":
             continue
 
-
-        historical_entry = float(
-            historical_signal["entry"]
+        entry_bt = float(
+            s["entry"]
         )
 
-        historical_stop = float(
-            historical_signal["sl"]
+        stop_bt = float(
+            s["sl"]
         )
 
-        historical_target = float(
-            historical_signal["tp"]
+        target_bt = float(
+            s["tp"]
         )
-
-
-        # -------------------------------------------------
-        # Risk per trade
-        # -------------------------------------------------
-
-        if historical_direction == "BUY":
-
-            risk_distance = (
-                historical_entry -
-                historical_stop
-            )
-
-        else:
-
-            risk_distance = (
-                historical_stop -
-                historical_entry
-            )
-
-
-        if risk_distance <= 0:
-
-            continue
-
-
-        # -------------------------------------------------
-        # Future candles
-        # -------------------------------------------------
 
         future = df_15m.iloc[
             i + 1:
             i + 1 + horizon
         ]
 
-
-        if future.empty:
-
-            continue
-
-
-        # -------------------------------------------------
-        # Default outcome = TIMEOUT
-        #
-        # But unlike the old version, timeout is NOT
-        # automatically assigned 0R.
-        #
-        # We calculate the actual R at the final close.
-        # -------------------------------------------------
-
         result = "TIMEOUT"
+        result_r = 0.0
 
         exit_price = float(
             future["close"].iloc[-1]
@@ -605,7 +452,6 @@ def run_backtest(
         exit_time = (
             future["time"].iloc[-1]
         )
-
 
         for _, candle in future.iterrows():
 
@@ -617,180 +463,68 @@ def run_backtest(
                 candle["low"]
             )
 
-
-            if historical_direction == "BUY":
+            if bt_direction == "BUY":
 
                 stop_hit = (
-                    low <= historical_stop
+                    low <= stop_bt
                 )
 
                 target_hit = (
-                    high >= historical_target
+                    high >= target_bt
                 )
 
             else:
 
                 stop_hit = (
-                    high >= historical_stop
+                    high >= stop_bt
                 )
 
                 target_hit = (
-                    low <= historical_target
+                    low <= target_bt
                 )
 
-
-            # -------------------------------------------------
-            # Conservative same-candle rule
-            # -------------------------------------------------
-
-            if (
-                stop_hit
-                and
-                target_hit
-            ):
+            if stop_hit and target_hit:
 
                 result = "LOSS"
-
-                exit_price = (
-                    historical_stop
-                )
-
-                exit_time = (
-                    candle["time"]
-                )
+                result_r = -1.0
+                exit_price = stop_bt
+                exit_time = candle["time"]
 
                 break
-
 
             if stop_hit:
 
                 result = "LOSS"
-
-                exit_price = (
-                    historical_stop
-                )
-
-                exit_time = (
-                    candle["time"]
-                )
+                result_r = -1.0
+                exit_price = stop_bt
+                exit_time = candle["time"]
 
                 break
-
 
             if target_hit:
 
                 result = "WIN"
-
-                exit_price = (
-                    historical_target
-                )
-
-                exit_time = (
-                    candle["time"]
-                )
+                result_r = 3.0
+                exit_price = target_bt
+                exit_time = candle["time"]
 
                 break
-
-
-        # -------------------------------------------------
-        # Calculate actual R
-        # -------------------------------------------------
-
-        if historical_direction == "BUY":
-
-            result_r = (
-                exit_price -
-                historical_entry
-            ) / risk_distance
-
-        else:
-
-            result_r = (
-                historical_entry -
-                exit_price
-            ) / risk_distance
-
-
-        # -------------------------------------------------
-        # Safety clamp
-        #
-        # A timeout should not magically produce more
-        # than the predefined target.
-        # -------------------------------------------------
-
-        if result == "TIMEOUT":
-
-            result_r = max(
-                -1.0,
-                min(
-                    3.0,
-                    result_r
-                )
-            )
-
-
-        # -------------------------------------------------
-        # Record trade
-        # -------------------------------------------------
 
         results.append(
             {
                 "Signal Time": current_time,
-
-                "Direction": historical_direction,
-
-                "Score": int(
-                    historical_signal.get(
-                        "score",
-                        0
-                    )
-                ),
-
-                "BUY Score": float(
-                    historical_signal.get(
-                        "buy_score",
-                        0
-                    )
-                ),
-
-                "SELL Score": float(
-                    historical_signal.get(
-                        "sell_score",
-                        0
-                    )
-                ),
-
-                "RSI": float(
-                    historical_signal.get(
-                        "rsi",
-                        50
-                    )
-                ),
-
-                "Entry": round(
-                    historical_entry,
-                    2
-                ),
-
-                "SL": round(
-                    historical_stop,
-                    2
-                ),
-
-                "TP": round(
-                    historical_target,
-                    2
-                ),
-
+                "Direction": bt_direction,
+                "Score": s["score"],
+                "BUY Score": s["buy_score"],
+                "SELL Score": s["sell_score"],
+                "RSI": s["rsi"],
+                "ATR": s["atr"],
+                "Entry": round(entry_bt, 2),
+                "SL": round(stop_bt, 2),
+                "TP": round(target_bt, 2),
                 "Result": result,
-
-                "R": round(
-                    result_r,
-                    3
-                ),
-
+                "R": result_r,
                 "Exit Time": exit_time,
-
                 "Exit Price": round(
                     exit_price,
                     2
@@ -798,12 +532,11 @@ def run_backtest(
             }
         )
 
-
     return results
 
 
 # =========================================================
-# RUN BACKTEST
+# RUN
 # =========================================================
 
 try:
@@ -818,12 +551,10 @@ try:
             df_4h
         )
 
-
     if not results:
 
         st.warning(
-            "No qualifying trades were found "
-            "in the available historical data."
+            "No qualifying trades were found."
         )
 
     else:
@@ -832,64 +563,30 @@ try:
             results
         )
 
-
-        # -------------------------------------------------
-        # BASIC STATISTICS
-        # -------------------------------------------------
-
-        trades = len(
-            journal
-        )
+        trades = len(journal)
 
         wins = (
-            journal["Result"] ==
-            "WIN"
+            journal["Result"] == "WIN"
         ).sum()
 
         losses = (
-            journal["Result"] ==
-            "LOSS"
+            journal["Result"] == "LOSS"
         ).sum()
 
         timeouts = (
-            journal["Result"] ==
-            "TIMEOUT"
+            journal["Result"] == "TIMEOUT"
         ).sum()
 
-
-        # -------------------------------------------------
-        # WIN RATE
-        #
-        # Win rate now means actual TP winners /
-        # all completed research trades.
-        # -------------------------------------------------
-
         win_rate = (
-            wins /
-            trades *
-            100
+            wins / trades * 100
         )
 
+        net_r = journal["R"].sum()
 
-        # -------------------------------------------------
-        # NET R
-        # -------------------------------------------------
-
-        net_r = (
-            journal["R"].sum()
-        )
-
-
-        # -------------------------------------------------
-        # PROFIT FACTOR
-        # -------------------------------------------------
-
-        gross_profit = (
-            journal.loc[
-                journal["R"] > 0,
-                "R"
-            ].sum()
-        )
+        gross_profit = journal.loc[
+            journal["R"] > 0,
+            "R"
+        ].sum()
 
         gross_loss = abs(
             journal.loc[
@@ -897,7 +594,6 @@ try:
                 "R"
             ].sum()
         )
-
 
         if gross_loss > 0:
 
@@ -908,59 +604,33 @@ try:
 
         else:
 
-            profit_factor = float(
-                "inf"
-            )
-
-
-        # -------------------------------------------------
-        # EXPECTANCY
-        # -------------------------------------------------
+            profit_factor = float("inf")
 
         expectancy = (
-            net_r /
-            trades
+            net_r / trades
         )
-
-
-        # -------------------------------------------------
-        # EQUITY
-        # -------------------------------------------------
 
         equity = (
             journal["R"]
             .cumsum()
         )
 
-
-        peak = (
-            equity.cummax()
-        )
-
+        peak = equity.cummax()
 
         drawdown = (
-            equity -
-            peak
+            equity - peak
         )
-
 
         max_drawdown = (
             drawdown.min()
         )
 
-
-        # -------------------------------------------------
-        # MAX LOSING STREAK
-        # -------------------------------------------------
-
         current_streak = 0
-
         max_streak = 0
 
+        for value in journal["R"]:
 
-        for r in journal["R"]:
-
-            if r < 0:
+            if value < 0:
 
                 current_streak += 1
 
@@ -973,53 +643,26 @@ try:
 
                 current_streak = 0
 
-
         # -------------------------------------------------
-        # AVERAGE TIMEOUT R
-        # -------------------------------------------------
-
-        timeout_r = journal.loc[
-            journal["Result"] ==
-            "TIMEOUT",
-            "R"
-        ]
-
-
-        if len(timeout_r) > 0:
-
-            average_timeout_r = (
-                timeout_r.mean()
-            )
-
-        else:
-
-            average_timeout_r = 0.0
-
-
-        # -------------------------------------------------
-        # DISPLAY MAIN METRICS
+        # METRICS
         # -------------------------------------------------
 
         b1, b2, b3, b4, b5 = st.columns(5)
-
 
         b1.metric(
             "Trades",
             trades
         )
 
-
         b2.metric(
             "Win Rate",
             f"{win_rate:.1f}%"
         )
 
-
         b3.metric(
             "Net R",
             f"{net_r:.2f}R"
         )
-
 
         b4.metric(
             "Profit Factor",
@@ -1030,67 +673,37 @@ try:
             )
         )
 
-
         b5.metric(
             "Max Drawdown",
             f"{max_drawdown:.2f}R"
         )
 
-
-        # -------------------------------------------------
-        # SECONDARY METRICS
-        # -------------------------------------------------
-
         e1, e2, e3 = st.columns(3)
-
 
         e1.metric(
             "Expectancy",
             f"{expectancy:.3f}R"
         )
 
-
         e2.metric(
             "Timeouts",
             timeouts
         )
-
 
         e3.metric(
             "Max Losing Streak",
             max_streak
         )
 
-
         # -------------------------------------------------
-        # TIMEOUT INFORMATION
-        # -------------------------------------------------
-
-        st.write(
-            f"**Average Timeout Result:** "
-            f"{average_timeout_r:.3f}R"
-        )
-
-
-        st.caption(
-            "Timeout trades are now closed at the "
-            "final candle close and contribute their "
-            "actual gain/loss in R. They are no longer "
-            "automatically counted as 0R."
-        )
-
-
-        # -------------------------------------------------
-        # EQUITY CURVE
+        # EQUITY
         # -------------------------------------------------
 
         st.subheader(
             "📈 Research Equity Curve"
         )
 
-
         equity_fig = go.Figure()
-
 
         equity_fig.add_trace(
             go.Scatter(
@@ -1099,4 +712,57 @@ try:
                         1,
                         len(equity) + 1
                     )
- 
+                ),
+                y=equity.tolist(),
+                mode="lines+markers",
+                name="Cumulative R"
+            )
+        )
+
+        equity_fig.update_layout(
+            height=350,
+            xaxis_title="Trade",
+            yaxis_title="Cumulative R"
+        )
+
+        st.plotly_chart(
+            equity_fig,
+            use_container_width=True
+        )
+
+        # -------------------------------------------------
+        # JOURNAL
+        # -------------------------------------------------
+
+        st.subheader(
+            "📒 Trade Journal"
+        )
+
+        st.dataframe(
+            journal,
+            use_container_width=True,
+            hide_index=True
+        )
+
+except Exception as error:
+
+    st.error(
+        "Backtest failed."
+    )
+
+    st.exception(error)
+
+
+# =========================================================
+# FOOTER
+# =========================================================
+
+st.divider()
+
+st.caption(
+    "Alpha 1.1 is a research prototype. "
+    "Market data comes from Twelve Data. "
+    "Backtest results are historical research only "
+    "and are not proof of future performance. "
+    "Real-money execution is disabled."
+    )
