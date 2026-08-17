@@ -1,10 +1,17 @@
 import pandas as pd
 import numpy as np
-print("DEBUG: NEW STRATEGY FILE LOADED")
+
 
 # =========================================================
 # INDICATORS
 # =========================================================
+
+def calculate_ema(series, period):
+    return series.ewm(
+        span=period,
+        adjust=False
+    ).mean()
+
 
 def calculate_rsi(series, period=14):
     delta = series.diff()
@@ -24,41 +31,39 @@ def calculate_rsi(series, period=14):
         adjust=False
     ).mean()
 
-    rs = avg_gain / avg_loss.replace(0, np.nan)
+    rs = avg_gain / avg_loss.replace(
+        0,
+        np.nan
+    )
 
-    rsi = 100 - (100 / (1 + rs))
+    rsi = 100 - (
+        100 / (1 + rs)
+    )
 
     return rsi.fillna(50)
 
 
 def calculate_atr(df, period=14):
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
-
-    previous_close = close.shift(1)
+    previous_close = df["close"].shift(1)
 
     tr = pd.concat(
         [
-            high - low,
-            (high - previous_close).abs(),
-            (low - previous_close).abs()
+            df["high"] - df["low"],
+            (
+                df["high"] -
+                previous_close
+            ).abs(),
+            (
+                df["low"] -
+                previous_close
+            ).abs()
         ],
         axis=1
     ).max(axis=1)
 
-    atr = tr.ewm(
+    return tr.ewm(
         alpha=1 / period,
         min_periods=period,
-        adjust=False
-    ).mean()
-
-    return atr
-
-
-def calculate_ema(series, period):
-    return series.ewm(
-        span=period,
         adjust=False
     ).mean()
 
@@ -68,27 +73,43 @@ def calculate_ema(series, period):
 # =========================================================
 
 def get_trend(df):
+
     if len(df) < 50:
         return "NEUTRAL"
 
     close = df["close"]
 
-    ema20 = calculate_ema(close, 20)
-    ema50 = calculate_ema(close, 50)
+    ema20 = calculate_ema(
+        close,
+        20
+    )
 
-    last_close = float(close.iloc[-1])
-    last_ema20 = float(ema20.iloc[-1])
-    last_ema50 = float(ema50.iloc[-1])
+    ema50 = calculate_ema(
+        close,
+        50
+    )
+
+    price = float(
+        close.iloc[-1]
+    )
+
+    e20 = float(
+        ema20.iloc[-1]
+    )
+
+    e50 = float(
+        ema50.iloc[-1]
+    )
 
     if (
-        last_close > last_ema20
-        and last_ema20 > last_ema50
+        price > e20
+        and e20 > e50
     ):
         return "BULLISH"
 
     if (
-        last_close < last_ema20
-        and last_ema20 < last_ema50
+        price < e20
+        and e20 < e50
     ):
         return "BEARISH"
 
@@ -143,31 +164,31 @@ def generate_signal(
         14
     )
 
-    latest_close = float(
+    price = float(
         close.iloc[-1]
     )
 
-    previous_close = float(
+    previous_price = float(
         close.iloc[-2]
     )
 
-    latest_ema9 = float(
+    e9 = float(
         ema9.iloc[-1]
     )
 
-    latest_ema21 = float(
+    e21 = float(
         ema21.iloc[-1]
     )
 
-    latest_ema50 = float(
+    e50 = float(
         ema50.iloc[-1]
     )
 
-    previous_ema9 = float(
+    previous_e9 = float(
         ema9.iloc[-2]
     )
 
-    previous_ema21 = float(
+    previous_e21 = float(
         ema21.iloc[-2]
     )
 
@@ -179,36 +200,33 @@ def generate_signal(
         atr_series.iloc[-1]
     )
 
-    if not np.isfinite(atr) or atr <= 0:
+    if (
+        not np.isfinite(atr)
+        or atr <= 0
+    ):
         atr = max(
-            latest_close * 0.001,
+            price * 0.001,
             0.01
         )
 
     # -----------------------------------------------------
     # Momentum
     #
-    # Normalised price movement over the
-    # recent candles, expressed relative
-    # to ATR.
+    # Expressed in ATR units.
+    # Positive = upward momentum.
+    # Negative = downward momentum.
     # -----------------------------------------------------
 
     lookback = 8
 
-    if len(df) > lookback:
+    old_price = float(
+        close.iloc[-1 - lookback]
+    )
 
-        old_close = float(
-            close.iloc[-1 - lookback]
-        )
-
-        momentum = (
-            (latest_close - old_close)
-            / atr
-        )
-
-    else:
-
-        momentum = 0.0
+    momentum = (
+        (price - old_price)
+        / atr
+    )
 
     momentum = float(
         np.clip(
@@ -219,7 +237,7 @@ def generate_signal(
     )
 
     # -----------------------------------------------------
-    # Higher timeframe trends
+    # Higher timeframe trend
     # -----------------------------------------------------
 
     h1_trend = get_trend(
@@ -231,103 +249,101 @@ def generate_signal(
     )
 
     # =====================================================
-    # SCORING
-    #
-    # Maximum = 10
-    #
-    # The important change:
-    # conditions receive partial points.
-    # A trade does NOT automatically get
-    # 8/10 simply because the trend is bullish.
+    # RAW SCORES
     # =====================================================
 
     buy_score = 0.0
     sell_score = 0.0
 
     # -----------------------------------------------------
-    # 1. 15M EMA structure — 2 points
+    # EMA structure
     # -----------------------------------------------------
 
     if (
-        latest_ema9 > latest_ema21
-        and latest_ema21 > latest_ema50
+        e9 > e21
+        and e21 > e50
     ):
         buy_score += 2.0
 
-    elif (
-        latest_ema9 > latest_ema21
-    ):
+    elif e9 > e21:
         buy_score += 1.0
 
     if (
-        latest_ema9 < latest_ema21
-        and latest_ema21 < latest_ema50
+        e9 < e21
+        and e21 < e50
     ):
         sell_score += 2.0
 
-    elif (
-        latest_ema9 < latest_ema21
-    ):
+    elif e9 < e21:
         sell_score += 1.0
 
     # -----------------------------------------------------
-    # 2. EMA crossover / recent direction — 1 point
+    # EMA crossover / direction
     # -----------------------------------------------------
 
     if (
-        latest_ema9 > latest_ema21
-        and previous_ema9 <= previous_ema21
+        e9 > e21
+        and previous_e9 <= previous_e21
     ):
         buy_score += 1.0
 
-    elif (
-        latest_ema9 < latest_ema21
-        and previous_ema9 >= previous_ema21
+    if (
+        e9 < e21
+        and previous_e9 >= previous_e21
     ):
         sell_score += 1.0
 
     # -----------------------------------------------------
-    # 3. RSI — 2 points
+    # RSI
     #
-    # Avoid blindly buying every bullish RSI.
+    # We prefer momentum zones rather than
+    # treating every bullish RSI as strong.
     # -----------------------------------------------------
 
     if 52 <= rsi <= 65:
         buy_score += 2.0
 
     elif 50 <= rsi < 52:
-        buy_score += 1.0
+        buy_score += 0.75
 
     elif 65 < rsi <= 70:
-        buy_score += 1.0
+        buy_score += 0.75
 
     if 35 <= rsi <= 48:
         sell_score += 2.0
 
     elif 48 < rsi <= 50:
-        sell_score += 1.0
+        sell_score += 0.75
 
     elif 30 <= rsi < 35:
-        sell_score += 1.0
-
-    # -----------------------------------------------------
-    # 4. Momentum — 1.5 points
-    # -----------------------------------------------------
-
-    if momentum >= 1.0:
-        buy_score += 1.5
-
-    elif momentum >= 0.35:
-        buy_score += 0.75
-
-    if momentum <= -1.0:
-        sell_score += 1.5
-
-    elif momentum <= -0.35:
         sell_score += 0.75
 
     # -----------------------------------------------------
-    # 5. Higher timeframe alignment — 2 points
+    # Momentum
+    # -----------------------------------------------------
+
+    if momentum >= 1.0:
+        buy_score += 2.0
+
+    elif momentum >= 0.35:
+        buy_score += 1.0
+
+    elif momentum < 0:
+        # Explicit penalty.
+        buy_score -= 1.0
+
+    if momentum <= -1.0:
+        sell_score += 2.0
+
+    elif momentum <= -0.35:
+        sell_score += 1.0
+
+    elif momentum > 0:
+        # Explicit penalty.
+        sell_score -= 1.0
+
+    # -----------------------------------------------------
+    # Higher timeframe alignment
     # -----------------------------------------------------
 
     if h1_trend == "BULLISH":
@@ -343,17 +359,17 @@ def generate_signal(
         sell_score += 1.0
 
     # -----------------------------------------------------
-    # 6. Price relative to EMA50 — 1.5 points
+    # Price vs EMA50
     # -----------------------------------------------------
 
-    if latest_close > latest_ema50:
-        buy_score += 1.5
+    if price > e50:
+        buy_score += 1.0
 
-    elif latest_close < latest_ema50:
-        sell_score += 1.5
+    elif price < e50:
+        sell_score += 1.0
 
     # -----------------------------------------------------
-    # Clamp scores
+    # Clamp raw scores
     # -----------------------------------------------------
 
     buy_score = float(
@@ -373,33 +389,67 @@ def generate_signal(
     )
 
     # =====================================================
-    # DECISION
+    # HARD QUALITY FILTERS
+    #
+    # This is the important Alpha 1.2 change.
     # =====================================================
 
-    difference = (
-        abs(
-            buy_score -
-            sell_score
-        )
+    bullish_confirmation = (
+        h1_trend == "BULLISH"
+        and h4_trend == "BULLISH"
+        and e9 > e21
+        and price > e21
+        and momentum > 0
+        and rsi >= 50
     )
 
-    # Require a reasonably strong
-    # directional edge.
-    #
-    # This is what prevents the system
-    # from calling BUY constantly.
+    bearish_confirmation = (
+        h1_trend == "BEARISH"
+        and h4_trend == "BEARISH"
+        and e9 < e21
+        and price < e21
+        and momentum < 0
+        and rsi <= 50
+    )
+
+    # =====================================================
+    # FINAL DECISION
     # =====================================================
 
     minimum_score = 6.0
     minimum_edge = 1.5
 
+    direction = "WAIT"
+
     if (
-        buy_score >= minimum_score
+        bullish_confirmation
+        and buy_score >= minimum_score
         and buy_score > sell_score
-        and difference >= minimum_edge
+        and (
+            buy_score -
+            sell_score
+        ) >= minimum_edge
     ):
 
         direction = "BUY"
+
+    elif (
+        bearish_confirmation
+        and sell_score >= minimum_score
+        and sell_score > buy_score
+        and (
+            sell_score -
+            buy_score
+        ) >= minimum_edge
+    ):
+
+        direction = "SELL"
+
+    # -----------------------------------------------------
+    # Display score
+    # -----------------------------------------------------
+
+    if direction == "BUY":
 
         score = int(
             round(
@@ -407,13 +457,7 @@ def generate_signal(
             )
         )
 
-    elif (
-        sell_score >= minimum_score
-        and sell_score > buy_score
-        and difference >= minimum_edge
-    ):
-
-        direction = "SELL"
+    elif direction == "SELL":
 
         score = int(
             round(
@@ -423,12 +467,9 @@ def generate_signal(
 
     else:
 
-        direction = "WAIT"
-
-        # For WAIT, show the stronger
-        # side's quality rather than
-        # pretending there is a trade.
-
+        # WAIT shows the strongest side's
+        # current quality, but it is NOT
+        # considered a trade signal.
         score = int(
             round(
                 max(
@@ -447,13 +488,10 @@ def generate_signal(
     )
 
     # =====================================================
-    # ENTRY / SL / TP
+    # ATR-BASED RISK
     # =====================================================
 
-    entry = latest_close
-
-    # Use ATR-based risk instead of
-    # an extremely tiny fixed stop.
+    entry = price
 
     stop_distance = (
         atr * 1.5
@@ -465,31 +503,38 @@ def generate_signal(
 
     if direction == "BUY":
 
-        sl = entry - stop_distance
+        sl = (
+            entry -
+            stop_distance
+        )
 
-        tp = entry + target_distance
+        tp = (
+            entry +
+            target_distance
+        )
 
     elif direction == "SELL":
 
-        sl = entry + stop_distance
+        sl = (
+            entry +
+            stop_distance
+        )
 
-        tp = entry - target_distance
+        tp = (
+            entry -
+            target_distance
+        )
 
     else:
 
         sl = entry
-
         tp = entry
 
     # =====================================================
-    # RETURN COMPLETE SIGNAL
-    #
-    # Every key expected by app.py
-    # is always returned.
+    # RETURN
     # =====================================================
 
     return {
-
         "direction": direction,
 
         "score": score,
