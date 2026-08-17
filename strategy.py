@@ -1,20 +1,19 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 
 # =========================================================
 # INDICATORS
 # =========================================================
 
-def calculate_ema(series, period):
+def ema(series, period):
     return series.ewm(
         span=period,
         adjust=False
     ).mean()
 
 
-def calculate_rsi(series, period=14):
-
+def rsi(series, period=14):
     delta = series.diff()
 
     gain = delta.clip(lower=0)
@@ -22,14 +21,14 @@ def calculate_rsi(series, period=14):
 
     avg_gain = gain.ewm(
         alpha=1 / period,
-        min_periods=period,
-        adjust=False
+        adjust=False,
+        min_periods=period
     ).mean()
 
     avg_loss = loss.ewm(
         alpha=1 / period,
-        min_periods=period,
-        adjust=False
+        adjust=False,
+        min_periods=period
     ).mean()
 
     rs = avg_gain / avg_loss.replace(
@@ -37,14 +36,14 @@ def calculate_rsi(series, period=14):
         np.nan
     )
 
-    rsi = 100 - (
+    result = 100 - (
         100 / (1 + rs)
     )
 
-    return rsi.fillna(50)
+    return result.fillna(50)
 
 
-def calculate_atr(df, period=14):
+def atr(df, period=14):
 
     previous_close = df["close"].shift(1)
 
@@ -65,9 +64,43 @@ def calculate_atr(df, period=14):
 
     return tr.ewm(
         alpha=1 / period,
-        min_periods=period,
-        adjust=False
+        adjust=False,
+        min_periods=period
     ).mean()
+
+
+# =========================================================
+# DATA CLEANING
+# =========================================================
+
+def clean_data(df):
+
+    required = [
+        "time",
+        "open",
+        "high",
+        "low",
+        "close"
+    ]
+
+    data = df[
+        required
+    ].copy()
+
+    data = data.dropna()
+
+    data = data.sort_values(
+        "time"
+    )
+
+    data = data.drop_duplicates(
+        subset="time",
+        keep="last"
+    )
+
+    return data.reset_index(
+        drop=True
+    )
 
 
 # =========================================================
@@ -81,38 +114,20 @@ def get_trend(df):
 
     close = df["close"]
 
-    ema20 = calculate_ema(
+    fast = ema(
         close,
         20
-    )
+    ).iloc[-1]
 
-    ema50 = calculate_ema(
+    slow = ema(
         close,
         50
-    )
+    ).iloc[-1]
 
-    price = float(
-        close.iloc[-1]
-    )
-
-    e20 = float(
-        ema20.iloc[-1]
-    )
-
-    e50 = float(
-        ema50.iloc[-1]
-    )
-
-    if (
-        price > e20
-        and e20 > e50
-    ):
+    if fast > slow:
         return "BULLISH"
 
-    if (
-        price < e20
-        and e20 < e50
-    ):
+    if fast < slow:
         return "BEARISH"
 
     return "NEUTRAL"
@@ -128,84 +143,85 @@ def generate_signal(
     df_4h
 ):
 
-    df = df_15m.copy()
-
-    if len(df) < 100:
-        raise ValueError(
-            "Not enough 15M candles."
-        )
-
-    close = df["close"]
-
-    # -----------------------------------------------------
-    # Indicators
-    # -----------------------------------------------------
-
-    ema9 = calculate_ema(
-        close,
-        9
+    data_15m = clean_data(
+        df_15m
     )
 
-    ema21 = calculate_ema(
-        close,
-        21
+    data_1h = clean_data(
+        df_1h
     )
 
-    ema50 = calculate_ema(
+    data_4h = clean_data(
+        df_4h
+    )
+
+    price = float(
+        data_15m["close"].iloc[-1]
+    )
+
+    # -----------------------------------------------------
+    # Safety check
+    # -----------------------------------------------------
+
+    if (
+        len(data_15m) < 60
+        or len(data_1h) < 50
+        or len(data_4h) < 50
+    ):
+
+        return {
+            "direction": "WAIT",
+            "score": 0.0,
+            "buy_score": 0.0,
+            "sell_score": 0.0,
+            "entry": None,
+            "sl": None,
+            "tp": None,
+            "h1_trend": "NEUTRAL",
+            "h4_trend": "NEUTRAL",
+            "rsi": 50.0,
+            "atr": 0.0,
+            "momentum": 0.0,
+            "reason": "Not enough historical data."
+        }
+
+    # -----------------------------------------------------
+    # 15M indicators
+    # -----------------------------------------------------
+
+    close = data_15m["close"]
+
+    ema20 = ema(
+        close,
+        20
+    )
+
+    ema50 = ema(
         close,
         50
     )
 
-    rsi_series = calculate_rsi(
-        close,
-        14
+    current_ema20 = float(
+        ema20.iloc[-1]
     )
 
-    atr_series = calculate_atr(
-        df,
-        14
-    )
-
-    price = float(
-        close.iloc[-1]
-    )
-
-    e9 = float(
-        ema9.iloc[-1]
-    )
-
-    e21 = float(
-        ema21.iloc[-1]
-    )
-
-    e50 = float(
+    current_ema50 = float(
         ema50.iloc[-1]
     )
 
-    previous_e9 = float(
-        ema9.iloc[-2]
+    current_rsi = float(
+        rsi(
+            close,
+            14
+        ).iloc[-1]
     )
 
-    previous_e21 = float(
-        ema21.iloc[-2]
+    current_atr = float(
+        atr(
+            data_15m,
+            14
+        ).iloc[-1]
     )
-
-    rsi = float(
-        rsi_series.iloc[-1]
-    )
-
-    atr = float(
-        atr_series.iloc[-1]
-    )
-
-    if (
-        not np.isfinite(atr)
-        or atr <= 0
-    ):
-        atr = max(
-            price * 0.001,
-            0.01
-        )
 
     # -----------------------------------------------------
     # Momentum
@@ -217,321 +233,381 @@ def generate_signal(
         close.iloc[-1 - lookback]
     )
 
-    momentum = (
-        price - old_price
-    ) / atr
+    momentum_pct = (
+        (
+            price /
+            old_price
+        ) - 1
+    ) * 100
 
-    momentum = float(
-        np.clip(
-            momentum,
-            -3.0,
-            3.0
-        )
+    # -----------------------------------------------------
+    # Higher timeframe trends
+    # -----------------------------------------------------
+
+    h1_trend = get_trend(
+        data_1h
     )
+
+    h4_trend = get_trend(
+        data_4h
+    )
+
+    # -----------------------------------------------------
+    # Recent structure
+    # -----------------------------------------------------
+
+    recent_high = float(
+        data_15m[
+            "high"
+        ]
+        .iloc[-21:-1]
+        .max()
+    )
+
+    recent_low = float(
+        data_15m[
+            "low"
+        ]
+        .iloc[-21:-1]
+        .min()
+    )
+
+    # =====================================================
+    # SCORING
+    #
+    # Maximum = 10
+    #
+    # Trend alignment       4 points
+    # 15M EMA direction     1 point
+    # Momentum               2 points
+    # RSI                    1 point
+    # Structure              1 point
+    # Volatility             1 point
+    # =====================================================
+
+    buy_score = 0.0
+    sell_score = 0.0
+
+    buy_reasons = []
+    sell_reasons = []
 
     # -----------------------------------------------------
     # Higher timeframe trend
     # -----------------------------------------------------
 
-    h1_trend = get_trend(
-        df_1h
-    )
-
-    h4_trend = get_trend(
-        df_4h
-    )
-
-    # -----------------------------------------------------
-    # Scores
-    # -----------------------------------------------------
-
-    buy_score = 0.0
-    sell_score = 0.0
-
-    # EMA structure
-
-    if (
-        e9 > e21
-        and e21 > e50
-    ):
-        buy_score += 2.0
-
-    elif e9 > e21:
-        buy_score += 1.0
-
-    if (
-        e9 < e21
-        and e21 < e50
-    ):
-        sell_score += 2.0
-
-    elif e9 < e21:
-        sell_score += 1.0
-
-    # EMA crossover
-
-    if (
-        e9 > e21
-        and previous_e9 <= previous_e21
-    ):
-        buy_score += 1.0
-
-    if (
-        e9 < e21
-        and previous_e9 >= previous_e21
-    ):
-        sell_score += 1.0
-
-    # RSI
-
-    if 52 <= rsi <= 65:
-        buy_score += 2.0
-
-    elif 50 <= rsi < 52:
-        buy_score += 0.75
-
-    elif 65 < rsi <= 70:
-        buy_score += 0.75
-
-    if 35 <= rsi <= 48:
-        sell_score += 2.0
-
-    elif 48 < rsi <= 50:
-        sell_score += 0.75
-
-    elif 30 <= rsi < 35:
-        sell_score += 0.75
-
-    # Momentum
-
-    if momentum >= 1.0:
-        buy_score += 2.0
-
-    elif momentum >= 0.35:
-        buy_score += 1.0
-
-    elif momentum < 0:
-        buy_score -= 1.0
-
-    if momentum <= -1.0:
-        sell_score += 2.0
-
-    elif momentum <= -0.35:
-        sell_score += 1.0
-
-    elif momentum > 0:
-        sell_score -= 1.0
-
-    # Higher timeframe
-
     if h1_trend == "BULLISH":
-        buy_score += 1.0
+        buy_score += 2.0
+        buy_reasons.append(
+            "1H bullish"
+        )
 
     elif h1_trend == "BEARISH":
-        sell_score += 1.0
+        sell_score += 2.0
+        sell_reasons.append(
+            "1H bearish"
+        )
 
     if h4_trend == "BULLISH":
-        buy_score += 1.0
+        buy_score += 2.0
+        buy_reasons.append(
+            "4H bullish"
+        )
 
     elif h4_trend == "BEARISH":
-        sell_score += 1.0
+        sell_score += 2.0
+        sell_reasons.append(
+            "4H bearish"
+        )
 
-    # Price vs EMA50
+    # -----------------------------------------------------
+    # 15M EMA
+    # -----------------------------------------------------
 
-    if price > e50:
+    if current_ema20 > current_ema50:
+
         buy_score += 1.0
 
-    elif price < e50:
+        buy_reasons.append(
+            "15M EMA bullish"
+        )
+
+    elif current_ema20 < current_ema50:
+
         sell_score += 1.0
 
+        sell_reasons.append(
+            "15M EMA bearish"
+        )
+
+    # -----------------------------------------------------
+    # Momentum
+    # -----------------------------------------------------
+
+    if momentum_pct >= 0.20:
+
+        buy_score += 2.0
+
+        buy_reasons.append(
+            "Positive momentum"
+        )
+
+    elif momentum_pct <= -0.20:
+
+        sell_score += 2.0
+
+        sell_reasons.append(
+            "Negative momentum"
+        )
+
+    # -----------------------------------------------------
+    # RSI
+    #
+    # Avoid buying when extremely overbought.
+    # Avoid selling when extremely oversold.
+    # -----------------------------------------------------
+
+    if 52 <= current_rsi <= 68:
+
+        buy_score += 1.0
+
+        buy_reasons.append(
+            "Healthy bullish RSI"
+        )
+
+    elif 32 <= current_rsi <= 48:
+
+        sell_score += 1.0
+
+        sell_reasons.append(
+            "Healthy bearish RSI"
+        )
+
+    # -----------------------------------------------------
+    # Structure
+    # -----------------------------------------------------
+
+    if price > recent_high:
+
+        buy_score += 1.0
+
+        buy_reasons.append(
+            "Recent high breakout"
+        )
+
+    elif price < recent_low:
+
+        sell_score += 1.0
+
+        sell_reasons.append(
+            "Recent low breakdown"
+        )
+
+    # -----------------------------------------------------
+    # Volatility
+    #
+    # Only award the volatility point when ATR is
+    # reasonable relative to price.
+    # -----------------------------------------------------
+
+    atr_percent = (
+        current_atr /
+        price
+    ) * 100
+
+    volatility_ok = (
+        0.05 <= atr_percent <= 1.50
+    )
+
+    if volatility_ok:
+
+        if buy_score > sell_score:
+
+            buy_score += 1.0
+
+            buy_reasons.append(
+                "Usable volatility"
+            )
+
+        elif sell_score > buy_score:
+
+            sell_score += 1.0
+
+            sell_reasons.append(
+                "Usable volatility"
+            )
+
+    # -----------------------------------------------------
     # Clamp
+    # -----------------------------------------------------
 
-    buy_score = float(
-        np.clip(
+    buy_score = round(
+        min(
             buy_score,
-            0,
-            10
-        )
+            10.0
+        ),
+        2
     )
 
-    sell_score = float(
-        np.clip(
+    sell_score = round(
+        min(
             sell_score,
-            0,
-            10
-        )
+            10.0
+        ),
+        2
+    )
+
+    best_score = max(
+        buy_score,
+        sell_score
+    )
+
+    difference = abs(
+        buy_score -
+        sell_score
     )
 
     # =====================================================
-    # HARD CONFIRMATION
+    # SIGNAL FILTER
+    #
+    # We deliberately require:
+    #
+    # 1. Score >= 6.5
+    # 2. Directional difference >= 2
+    #
+    # This prevents weak BUY/SELL signals.
     # =====================================================
-
-    bullish_confirmation = (
-        h1_trend == "BULLISH"
-        and h4_trend == "BULLISH"
-        and e9 > e21
-        and price > e21
-        and momentum > 0
-        and rsi >= 50
-    )
-
-    bearish_confirmation = (
-        h1_trend == "BEARISH"
-        and h4_trend == "BEARISH"
-        and e9 < e21
-        and price < e21
-        and momentum < 0
-        and rsi <= 50
-    )
-
-    minimum_score = 6.0
-    minimum_edge = 1.5
 
     direction = "WAIT"
 
     if (
-        bullish_confirmation
-        and buy_score >= minimum_score
-        and buy_score > sell_score
-        and (
-            buy_score -
-            sell_score
-        ) >= minimum_edge
+        best_score >= 6.5
+        and difference >= 2.0
     ):
 
-        direction = "BUY"
+        if buy_score > sell_score:
 
-    elif (
-        bearish_confirmation
-        and sell_score >= minimum_score
-        and sell_score > buy_score
-        and (
-            sell_score -
-            buy_score
-        ) >= minimum_edge
-    ):
+            direction = "BUY"
 
-        direction = "SELL"
+        else:
 
-    if direction == "BUY":
-
-        score = int(
-            round(
-                buy_score
-            )
-        )
-
-    elif direction == "SELL":
-
-        score = int(
-            round(
-                sell_score
-            )
-        )
-
-    else:
-
-        score = int(
-            round(
-                max(
-                    buy_score,
-                    sell_score
-                )
-            )
-        )
-
-    score = int(
-        np.clip(
-            score,
-            0,
-            10
-        )
-    )
+            direction = "SELL"
 
     # =====================================================
-    # ATR RISK MODEL
+    # WAIT
+    #
+    # IMPORTANT:
+    # Do NOT fabricate SL/TP for WAIT.
     # =====================================================
 
-    entry = price
+    if direction == "WAIT":
 
-    stop_distance = (
-        atr * 1.5
-    )
+        return {
+            "direction": "WAIT",
+            "score": best_score,
+            "buy_score": buy_score,
+            "sell_score": sell_score,
+            "entry": None,
+            "sl": None,
+            "tp": None,
+            "h1_trend": h1_trend,
+            "h4_trend": h4_trend,
+            "rsi": round(
+                current_rsi,
+                2
+            ),
+            "atr": round(
+                current_atr,
+                2
+            ),
+            "momentum": round(
+                momentum_pct,
+                3
+            ),
+            "buy_reasons": buy_reasons,
+            "sell_reasons": sell_reasons,
+            "reason": (
+                "No sufficiently strong "
+                "directional setup."
+            )
+        }
 
-    target_distance = (
-        stop_distance * 3.0
+    # =====================================================
+    # RISK MANAGEMENT
+    #
+    # Risk = 1.25 ATR
+    # Reward = 3 ATR
+    #
+    # Therefore approximate R:R = 1:3
+    # =====================================================
+
+    risk_distance = max(
+        current_atr * 1.25,
+        price * 0.0008
     )
 
     if direction == "BUY":
 
-        sl = (
+        entry = price
+
+        stop_loss = (
             entry -
-            stop_distance
+            risk_distance
         )
 
-        tp = (
+        take_profit = (
             entry +
-            target_distance
-        )
-
-    elif direction == "SELL":
-
-        sl = (
-            entry +
-            stop_distance
-        )
-
-        tp = (
-            entry -
-            target_distance
+            risk_distance * 3
         )
 
     else:
 
-        sl = entry
-        tp = entry
+        entry = price
 
-    # =====================================================
-    # RETURN EVERYTHING
-    # =====================================================
+        stop_loss = (
+            entry +
+            risk_distance
+        )
+
+        take_profit = (
+            entry -
+            risk_distance * 3
+        )
 
     return {
         "direction": direction,
-
-        "score": score,
-
-        "entry": float(entry),
-
-        "sl": float(sl),
-
-        "tp": float(tp),
-
-        "buy_score": round(
-            buy_score,
+        "score": best_score,
+        "buy_score": buy_score,
+        "sell_score": sell_score,
+        "entry": round(
+            entry,
             2
         ),
-
-        "sell_score": round(
-            sell_score,
+        "sl": round(
+            stop_loss,
             2
         ),
-
-        "rsi": round(
-            rsi,
+        "tp": round(
+            take_profit,
             2
         ),
-
-        "atr": round(
-            atr,
-            2
-        ),
-
-        "momentum": round(
-            momentum,
-            2
-        ),
-
         "h1_trend": h1_trend,
-
-        "h4_trend": h4_trend
+        "h4_trend": h4_trend,
+        "rsi": round(
+            current_rsi,
+            2
+        ),
+        "atr": round(
+            current_atr,
+            2
+        ),
+        "momentum": round(
+            momentum_pct,
+            3
+        ),
+        "buy_reasons": buy_reasons,
+        "sell_reasons": sell_reasons,
+        "reason": (
+            "Directional setup passed "
+            "the signal filters."
+        )
     }
