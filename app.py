@@ -358,7 +358,7 @@ st.subheader(
 )
 
 
-def run_backtest(
+ def run_backtest(
     df_15m,
     df_1h,
     df_4h
@@ -366,12 +366,10 @@ def run_backtest(
 
     results = []
 
-    minimum_candles = 120
+    minimum_candles = 220
     horizon = 20
 
-    last_index = (
-        len(df_15m) - horizon
-    )
+    last_index = len(df_15m) - horizon
 
     for i in range(
         minimum_candles,
@@ -402,39 +400,48 @@ def run_backtest(
             .copy()
         )
 
-        if len(current_1h) < 120:
+        if len(current_1h) < 50:
             continue
 
-        if len(current_4h) < 120:
+        if len(current_4h) < 50:
             continue
 
         try:
 
-            s = generate_signal(
+            signal = generate_signal(
                 current_15m,
                 current_1h,
                 current_4h
             )
 
         except Exception:
-
             continue
 
-        bt_direction = s["direction"]
+        direction = signal.get(
+            "direction",
+            "WAIT"
+        )
 
-        if bt_direction == "WAIT":
+        # -------------------------------------------------
+        # WAIT IS NOT A TRADE
+        # -------------------------------------------------
+
+        if direction not in [
+            "BUY",
+            "SELL"
+        ]:
             continue
 
-        entry_bt = float(
-            s["entry"]
+        entry = float(
+            signal["entry"]
         )
 
-        stop_bt = float(
-            s["sl"]
+        stop = float(
+            signal["sl"]
         )
 
-        target_bt = float(
-            s["tp"]
+        target = float(
+            signal["tp"]
         )
 
         future = df_15m.iloc[
@@ -442,7 +449,11 @@ def run_backtest(
             i + 1 + horizon
         ]
 
+        if future.empty:
+            continue
+
         result = "TIMEOUT"
+
         result_r = 0.0
 
         exit_price = float(
@@ -452,6 +463,10 @@ def run_backtest(
         exit_time = (
             future["time"].iloc[-1]
         )
+
+        # -------------------------------------------------
+        # CHECK FUTURE PRICE ACTION
+        # -------------------------------------------------
 
         for _, candle in future.iterrows():
 
@@ -463,31 +478,41 @@ def run_backtest(
                 candle["low"]
             )
 
-            if bt_direction == "BUY":
+            if direction == "BUY":
 
                 stop_hit = (
-                    low <= stop_bt
+                    low <= stop
                 )
 
                 target_hit = (
-                    high >= target_bt
+                    high >= target
                 )
 
             else:
 
                 stop_hit = (
-                    high >= stop_bt
+                    high >= stop
                 )
 
                 target_hit = (
-                    low <= target_bt
+                    low <= target
                 )
 
-            if stop_hit and target_hit:
+            # Conservative assumption:
+            # if SL and TP are both touched
+            # in one candle, SL happens first.
+
+            if (
+                stop_hit
+                and target_hit
+            ):
 
                 result = "LOSS"
+
                 result_r = -1.0
-                exit_price = stop_bt
+
+                exit_price = stop
+
                 exit_time = candle["time"]
 
                 break
@@ -495,8 +520,11 @@ def run_backtest(
             if stop_hit:
 
                 result = "LOSS"
+
                 result_r = -1.0
-                exit_price = stop_bt
+
+                exit_price = stop
+
                 exit_time = candle["time"]
 
                 break
@@ -504,27 +532,88 @@ def run_backtest(
             if target_hit:
 
                 result = "WIN"
+
                 result_r = 3.0
-                exit_price = target_bt
+
+                exit_price = target
+
                 exit_time = candle["time"]
 
                 break
 
+        # -------------------------------------------------
+        # SAVE TRADE
+        # -------------------------------------------------
+
         results.append(
             {
                 "Signal Time": current_time,
-                "Direction": bt_direction,
-                "Score": s["score"],
-                "BUY Score": s["buy_score"],
-                "SELL Score": s["sell_score"],
-                "RSI": s["rsi"],
-                "ATR": s["atr"],
-                "Entry": round(entry_bt, 2),
-                "SL": round(stop_bt, 2),
-                "TP": round(target_bt, 2),
+
+                "Direction": direction,
+
+                "Score": int(
+                    signal.get(
+                        "score",
+                        0
+                    )
+                ),
+
+                "BUY Score": float(
+                    signal.get(
+                        "buy_score",
+                        0
+                    )
+                ),
+
+                "SELL Score": float(
+                    signal.get(
+                        "sell_score",
+                        0
+                    )
+                ),
+
+                "RSI": float(
+                    signal.get(
+                        "rsi",
+                        50
+                    )
+                ),
+
+                "Momentum": float(
+                    signal.get(
+                        "momentum",
+                        0
+                    )
+                ),
+
+                "ATR": float(
+                    signal.get(
+                        "atr",
+                        0
+                    )
+                ),
+
+                "Entry": round(
+                    entry,
+                    2
+                ),
+
+                "SL": round(
+                    stop,
+                    2
+                ),
+
+                "TP": round(
+                    target,
+                    2
+                ),
+
                 "Result": result,
+
                 "R": result_r,
+
                 "Exit Time": exit_time,
+
                 "Exit Price": round(
                     exit_price,
                     2
@@ -534,235 +623,32 @@ def run_backtest(
 
     return results
 
+    
+            
+        
+            
 
-# =========================================================
-# RUN
-# =========================================================
+            
+                
+                
+        
 
-try:
+        
+        
 
-    with st.spinner(
-        "Running Alpha 1.1 research backtest..."
-    ):
+            
+        
 
-        results = run_backtest(
-            df_15m,
-            df_1h,
-            df_4h
-        )
+        
+        
+        
+        
+        
 
-    if not results:
-
-        st.warning(
-            "No qualifying trades were found."
-        )
-
-    else:
-
-        journal = pd.DataFrame(
-            results
-        )
-
-        trades = len(journal)
-
-        wins = (
-            journal["Result"] == "WIN"
-        ).sum()
-
-        losses = (
-            journal["Result"] == "LOSS"
-        ).sum()
-
-        timeouts = (
-            journal["Result"] == "TIMEOUT"
-        ).sum()
-
-        win_rate = (
-            wins / trades * 100
-        )
-
-        net_r = journal["R"].sum()
-
-        gross_profit = journal.loc[
-            journal["R"] > 0,
-            "R"
-        ].sum()
-
-        gross_loss = abs(
-            journal.loc[
-                journal["R"] < 0,
-                "R"
-            ].sum()
-        )
-
-        if gross_loss > 0:
-
-            profit_factor = (
-                gross_profit /
-                gross_loss
-            )
-
-        else:
-
-            profit_factor = float("inf")
-
-        expectancy = (
-            net_r / trades
-        )
-
-        equity = (
-            journal["R"]
-            .cumsum()
-        )
-
-        peak = equity.cummax()
-
-        drawdown = (
-            equity - peak
-        )
-
-        max_drawdown = (
-            drawdown.min()
-        )
-
-        current_streak = 0
-        max_streak = 0
-
-        for value in journal["R"]:
-
-            if value < 0:
-
-                current_streak += 1
-
-                max_streak = max(
-                    max_streak,
-                    current_streak
-                )
-
-            else:
-
-                current_streak = 0
-
-        # -------------------------------------------------
-        # METRICS
-        # -------------------------------------------------
-
-        b1, b2, b3, b4, b5 = st.columns(5)
-
-        b1.metric(
-            "Trades",
-            trades
-        )
-
-        b2.metric(
-            "Win Rate",
-            f"{win_rate:.1f}%"
-        )
-
-        b3.metric(
-            "Net R",
-            f"{net_r:.2f}R"
-        )
-
-        b4.metric(
-            "Profit Factor",
-            (
-                "∞"
-                if profit_factor == float("inf")
-                else f"{profit_factor:.2f}"
-            )
-        )
-
-        b5.metric(
-            "Max Drawdown",
-            f"{max_drawdown:.2f}R"
-        )
-
-        e1, e2, e3 = st.columns(3)
-
-        e1.metric(
-            "Expectancy",
-            f"{expectancy:.3f}R"
-        )
-
-        e2.metric(
-            "Timeouts",
-            timeouts
-        )
-
-        e3.metric(
-            "Max Losing Streak",
-            max_streak
-        )
-
-        # -------------------------------------------------
-        # EQUITY
-        # -------------------------------------------------
-
-        st.subheader(
-            "📈 Research Equity Curve"
-        )
-
-        equity_fig = go.Figure()
-
-        equity_fig.add_trace(
-            go.Scatter(
-                x=list(
-                    range(
-                        1,
-                        len(equity) + 1
-                    )
-                ),
-                y=equity.tolist(),
-                mode="lines+markers",
-                name="Cumulative R"
-            )
-        )
-
-        equity_fig.update_layout(
-            height=350,
-            xaxis_title="Trade",
-            yaxis_title="Cumulative R"
-        )
-
-        st.plotly_chart(
-            equity_fig,
-            use_container_width=True
-        )
-
-        # -------------------------------------------------
-        # JOURNAL
-        # -------------------------------------------------
-
-        st.subheader(
-            "📒 Trade Journal"
-        )
-
-        st.dataframe(
-            journal,
-            use_container_width=True,
-            hide_index=True
-        )
-
-except Exception as error:
-
-    st.error(
-        "Backtest failed."
-    )
-
-    st.exception(error)
+        
+        
 
 
-# =========================================================
-# FOOTER
-# =========================================================
-
-st.divider()
-
-st.caption(
-    "Alpha 1.1 is a research prototype. "
-    "Market data comes from Twelve Data. "
-    "Backtest results are historical research only "
     "and are not proof of future performance. "
     "Real-money execution is disabled."
     )
