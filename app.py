@@ -245,13 +245,10 @@ h4_trend = result.get(
 # 8 raw -> 10 display
 # 7 raw -> 8.75 display
 # etc.
+display_score = score
 
-display_score = min(
-    10,
-    round(
-        score * 10 / 8
-    )
-)
+    
+
 
 
 # =========================================================
