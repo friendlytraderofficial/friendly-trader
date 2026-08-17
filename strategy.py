@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-
+print("DEBUG: NEW STRATEGY FILE LOADED")
 
 # =========================================================
 # INDICATORS
