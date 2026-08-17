@@ -5,7 +5,7 @@ import requests
 import plotly.graph_objects as go
 
 from strategy import generate_signal
-
+st.write("DEBUG: Alpha 0.9 strategy loaded")
 
 # =========================================================
 # PAGE CONFIG
