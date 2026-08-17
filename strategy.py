@@ -14,6 +14,7 @@ def calculate_ema(series, period):
 
 
 def calculate_rsi(series, period=14):
+
     delta = series.diff()
 
     gain = delta.clip(lower=0)
@@ -44,6 +45,7 @@ def calculate_rsi(series, period=14):
 
 
 def calculate_atr(df, period=14):
+
     previous_close = df["close"].shift(1)
 
     tr = pd.concat(
@@ -117,7 +119,7 @@ def get_trend(df):
 
 
 # =========================================================
-# SIGNAL ENGINE
+# MAIN SIGNAL ENGINE
 # =========================================================
 
 def generate_signal(
@@ -168,10 +170,6 @@ def generate_signal(
         close.iloc[-1]
     )
 
-    previous_price = float(
-        close.iloc[-2]
-    )
-
     e9 = float(
         ema9.iloc[-1]
     )
@@ -211,10 +209,6 @@ def generate_signal(
 
     # -----------------------------------------------------
     # Momentum
-    #
-    # Expressed in ATR units.
-    # Positive = upward momentum.
-    # Negative = downward momentum.
     # -----------------------------------------------------
 
     lookback = 8
@@ -224,9 +218,8 @@ def generate_signal(
     )
 
     momentum = (
-        (price - old_price)
-        / atr
-    )
+        price - old_price
+    ) / atr
 
     momentum = float(
         np.clip(
@@ -248,16 +241,14 @@ def generate_signal(
         df_4h
     )
 
-    # =====================================================
-    # RAW SCORES
-    # =====================================================
+    # -----------------------------------------------------
+    # Scores
+    # -----------------------------------------------------
 
     buy_score = 0.0
     sell_score = 0.0
 
-    # -----------------------------------------------------
     # EMA structure
-    # -----------------------------------------------------
 
     if (
         e9 > e21
@@ -277,9 +268,7 @@ def generate_signal(
     elif e9 < e21:
         sell_score += 1.0
 
-    # -----------------------------------------------------
-    # EMA crossover / direction
-    # -----------------------------------------------------
+    # EMA crossover
 
     if (
         e9 > e21
@@ -293,12 +282,7 @@ def generate_signal(
     ):
         sell_score += 1.0
 
-    # -----------------------------------------------------
     # RSI
-    #
-    # We prefer momentum zones rather than
-    # treating every bullish RSI as strong.
-    # -----------------------------------------------------
 
     if 52 <= rsi <= 65:
         buy_score += 2.0
@@ -318,9 +302,7 @@ def generate_signal(
     elif 30 <= rsi < 35:
         sell_score += 0.75
 
-    # -----------------------------------------------------
     # Momentum
-    # -----------------------------------------------------
 
     if momentum >= 1.0:
         buy_score += 2.0
@@ -329,7 +311,6 @@ def generate_signal(
         buy_score += 1.0
 
     elif momentum < 0:
-        # Explicit penalty.
         buy_score -= 1.0
 
     if momentum <= -1.0:
@@ -339,12 +320,9 @@ def generate_signal(
         sell_score += 1.0
 
     elif momentum > 0:
-        # Explicit penalty.
         sell_score -= 1.0
 
-    # -----------------------------------------------------
-    # Higher timeframe alignment
-    # -----------------------------------------------------
+    # Higher timeframe
 
     if h1_trend == "BULLISH":
         buy_score += 1.0
@@ -358,9 +336,7 @@ def generate_signal(
     elif h4_trend == "BEARISH":
         sell_score += 1.0
 
-    # -----------------------------------------------------
     # Price vs EMA50
-    # -----------------------------------------------------
 
     if price > e50:
         buy_score += 1.0
@@ -368,9 +344,7 @@ def generate_signal(
     elif price < e50:
         sell_score += 1.0
 
-    # -----------------------------------------------------
-    # Clamp raw scores
-    # -----------------------------------------------------
+    # Clamp
 
     buy_score = float(
         np.clip(
@@ -389,9 +363,7 @@ def generate_signal(
     )
 
     # =====================================================
-    # HARD QUALITY FILTERS
-    #
-    # This is the important Alpha 1.2 change.
+    # HARD CONFIRMATION
     # =====================================================
 
     bullish_confirmation = (
@@ -411,10 +383,6 @@ def generate_signal(
         and momentum < 0
         and rsi <= 50
     )
-
-    # =====================================================
-    # FINAL DECISION
-    # =====================================================
 
     minimum_score = 6.0
     minimum_edge = 1.5
@@ -445,10 +413,6 @@ def generate_signal(
 
         direction = "SELL"
 
-    # -----------------------------------------------------
-    # Display score
-    # -----------------------------------------------------
-
     if direction == "BUY":
 
         score = int(
@@ -467,9 +431,6 @@ def generate_signal(
 
     else:
 
-        # WAIT shows the strongest side's
-        # current quality, but it is NOT
-        # considered a trade signal.
         score = int(
             round(
                 max(
@@ -488,7 +449,7 @@ def generate_signal(
     )
 
     # =====================================================
-    # ATR-BASED RISK
+    # ATR RISK MODEL
     # =====================================================
 
     entry = price
@@ -531,7 +492,7 @@ def generate_signal(
         tp = entry
 
     # =====================================================
-    # RETURN
+    # RETURN EVERYTHING
     # =====================================================
 
     return {
