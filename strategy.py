@@ -2,13 +2,8 @@ import numpy as np
 import pandas as pd
 
 
-# =========================================================
-# FRIENDLY TRADER — ALPHA 1.0
-# Strategy engine
-# =========================================================
-
-
 def prepare_indicators(df):
+
     data = df.copy()
 
     required = [
@@ -19,42 +14,36 @@ def prepare_indicators(df):
         "close",
     ]
 
-    missing = [
-        c for c in required
-        if c not in data.columns
-    ]
-
-    if missing:
-        raise ValueError(
-            f"Missing columns: {missing}"
-        )
+    for column in required:
+        if column not in data.columns:
+            raise ValueError(
+                f"Missing required column: {column}"
+            )
 
     data["time"] = pd.to_datetime(
         data["time"]
     )
 
-    for col in [
+    for column in [
         "open",
         "high",
         "low",
         "close",
     ]:
-        data[col] = pd.to_numeric(
-            data[col],
+        data[column] = pd.to_numeric(
+            data[column],
             errors="coerce"
         )
 
-    data = (
-        data
-        .dropna()
-        .sort_values("time")
-        .reset_index(drop=True)
+    data = data.dropna().copy()
+
+    data = data.sort_values(
+        "time"
+    ).reset_index(
+        drop=True
     )
 
-    # -----------------------------------------------------
     # EMA
-    # -----------------------------------------------------
-
     data["ema20"] = (
         data["close"]
         .ewm(
@@ -82,10 +71,7 @@ def prepare_indicators(df):
         .mean()
     )
 
-    # -----------------------------------------------------
     # RSI
-    # -----------------------------------------------------
-
     delta = data["close"].diff()
 
     gain = delta.clip(
@@ -96,27 +82,19 @@ def prepare_indicators(df):
         upper=0
     )
 
-    avg_gain = (
-        gain
-        .ewm(
-            alpha=1 / 14,
-            adjust=False
-        )
-        .mean()
-    )
+    average_gain = gain.ewm(
+        alpha=1 / 14,
+        adjust=False
+    ).mean()
 
-    avg_loss = (
-        loss
-        .ewm(
-            alpha=1 / 14,
-            adjust=False
-        )
-        .mean()
-    )
+    average_loss = loss.ewm(
+        alpha=1 / 14,
+        adjust=False
+    ).mean()
 
     rs = (
-        avg_gain /
-        avg_loss.replace(
+        average_gain /
+        average_loss.replace(
             0,
             np.nan
         )
@@ -130,77 +108,48 @@ def prepare_indicators(df):
         )
     )
 
-    # -----------------------------------------------------
     # ATR
-    # -----------------------------------------------------
-
     previous_close = (
         data["close"].shift(1)
     )
 
-    tr1 = (
+    range_1 = (
         data["high"] -
         data["low"]
     )
 
-    tr2 = (
+    range_2 = (
         data["high"] -
         previous_close
     ).abs()
 
-    tr3 = (
+    range_3 = (
         data["low"] -
         previous_close
     ).abs()
 
     true_range = pd.concat(
         [
-            tr1,
-            tr2,
-            tr3,
+            range_1,
+            range_2,
+            range_3,
         ],
         axis=1
     ).max(axis=1)
 
-    data["atr"] = (
-        true_range
-        .ewm(
-            alpha=1 / 14,
-            adjust=False
-        )
-        .mean()
-    )
+    data["atr"] = true_range.ewm(
+        alpha=1 / 14,
+        adjust=False
+    ).mean()
 
-    # -----------------------------------------------------
     # Momentum
-    # -----------------------------------------------------
-
     data["roc5"] = (
         data["close"]
         .pct_change(5)
         * 100
     )
 
-    # -----------------------------------------------------
-    # Candle information
-    # -----------------------------------------------------
-
-    data["body"] = (
-        data["close"] -
-        data["open"]
-    )
-
-    data["range"] = (
-        data["high"] -
-        data["low"]
-    )
-
     return data
-
-
-# =========================================================
-# TREND
-# =========================================================
 
 
 def get_trend(df):
@@ -209,7 +158,7 @@ def get_trend(df):
         df
     ).dropna()
 
-    if len(data) < 10:
+    if len(data) < 20:
         return "NEUTRAL"
 
     row = data.iloc[-1]
@@ -231,29 +180,15 @@ def get_trend(df):
     return "NEUTRAL"
 
 
-# =========================================================
-# CLAMP
-# =========================================================
-
-
-def clamp(
-    value,
-    minimum=0.0,
-    maximum=10.0
-):
+def limit_score(value):
 
     return max(
-        minimum,
+        0.0,
         min(
-            maximum,
+            10.0,
             float(value)
         )
     )
-
-
-# =========================================================
-# SIGNAL ENGINE
-# =========================================================
 
 
 def generate_signal(
@@ -267,10 +202,8 @@ def generate_signal(
     ).dropna()
 
     if len(data) < 200:
-
         raise ValueError(
-            "At least 200 valid 15M candles "
-            "are required."
+            "Not enough 15M candles."
         )
 
     row = data.iloc[-1]
@@ -306,14 +239,15 @@ def generate_signal(
     )
 
     if not np.isfinite(atr) or atr <= 0:
-
         atr = price * 0.001
 
+    if not np.isfinite(rsi):
+        rsi = 50.0
 
-    # =====================================================
-    # HIGHER TIMEFRAME TRENDS
-    # =====================================================
+    if not np.isfinite(roc5):
+        roc5 = 0.0
 
+    # Higher timeframe trend
     h1_trend = get_trend(
         df_1h
     )
@@ -322,79 +256,47 @@ def generate_signal(
         df_4h
     )
 
-
-    # =====================================================
-    # 15M TREND
-    # =====================================================
-
-    bullish_15m = (
-        ema20 > ema50 > ema200
-    )
-
-    bearish_15m = (
-        ema20 < ema50 < ema200
-    )
-
-
     # =====================================================
     # BUY SCORE
     # =====================================================
 
     buy_score = 0.0
 
-    # 15M trend
-    if bullish_15m:
-        buy_score += 2.0
-
-    elif price > ema50:
-        buy_score += 1.0
-
-
-    # 1H trend
-    if h1_trend == "BULLISH":
+    if ema20 > ema50:
         buy_score += 1.5
+
+    if ema50 > ema200:
+        buy_score += 1.5
+
+    if h1_trend == "BULLISH":
+        buy_score += 2.0
 
     elif h1_trend == "NEUTRAL":
         buy_score += 0.5
 
-
-    # 4H trend
     if h4_trend == "BULLISH":
-        buy_score += 1.5
+        buy_score += 2.0
 
     elif h4_trend == "NEUTRAL":
         buy_score += 0.5
 
-
-    # RSI
-    if 52 <= rsi <= 60:
+    if 52 <= rsi <= 65:
         buy_score += 1.5
-
-    elif 60 < rsi <= 65:
-        buy_score += 1.0
 
     elif 50 <= rsi < 52:
         buy_score += 0.5
 
     elif rsi > 70:
-        buy_score -= 1.0
+        buy_score -= 1.5
 
-
-    # Momentum
     if roc5 > 0:
         buy_score += 0.75
 
-    elif roc5 < -0.20:
-        buy_score -= 0.5
+    if price > ema20:
+        buy_score += 0.5
 
-
-    # Candle
     if row["close"] > row["open"]:
-        buy_score += 0.5
-
-    if row["close"] > previous["close"]:
-        buy_score += 0.5
-
+        buy_score += 0.25
 
     # =====================================================
     # SELL SCORE
@@ -402,118 +304,68 @@ def generate_signal(
 
     sell_score = 0.0
 
-    # 15M trend
-    if bearish_15m:
-        sell_score += 2.0
-
-    elif price < ema50:
-        sell_score += 1.0
-
-
-    # 1H trend
-    if h1_trend == "BEARISH":
+    if ema20 < ema50:
         sell_score += 1.5
+
+    if ema50 < ema200:
+        sell_score += 1.5
+
+    if h1_trend == "BEARISH":
+        sell_score += 2.0
 
     elif h1_trend == "NEUTRAL":
         sell_score += 0.5
 
-
-    # 4H trend
     if h4_trend == "BEARISH":
-        sell_score += 1.5
+        sell_score += 2.0
 
     elif h4_trend == "NEUTRAL":
         sell_score += 0.5
 
-
-    # RSI
-    if 40 <= rsi <= 48:
+    if 35 <= rsi <= 48:
         sell_score += 1.5
-
-    elif 35 <= rsi < 40:
-        sell_score += 1.0
 
     elif 48 < rsi <= 50:
         sell_score += 0.5
 
     elif rsi < 30:
-        sell_score -= 1.0
+        sell_score -= 1.5
 
-
-    # Momentum
     if roc5 < 0:
         sell_score += 0.75
 
-    elif roc5 > 0.20:
-        sell_score -= 0.5
+    if price < ema20:
+        sell_score += 0.5
 
-
-    # Candle
     if row["close"] < row["open"]:
-        sell_score += 0.5
+        sell_score += 0.25
 
-    if row["close"] < previous["close"]:
-        sell_score += 0.5
-
-
-    # =====================================================
-    # ENTRY QUALITY
-    # =====================================================
-
-    distance_from_ema20 = (
-        abs(price - ema20)
-        / atr
-    )
-
-    # Too far from EMA = bad chase entry
-    if distance_from_ema20 > 2.0:
-
-        buy_score -= 1.5
-        sell_score -= 1.5
-
-    elif distance_from_ema20 <= 0.75:
-
-        buy_score += 0.75
-        sell_score += 0.75
-
-
-    # =====================================================
-    # LIMIT SCORES
-    # =====================================================
-
-    buy_score = clamp(
+    buy_score = limit_score(
         buy_score
     )
 
-    sell_score = clamp(
+    sell_score = limit_score(
         sell_score
     )
 
-
     # =====================================================
-    # SIGNAL
+    # SIGNAL FILTER
     # =====================================================
 
-    score_difference = (
-        abs(
-            buy_score -
-            sell_score
-        )
+    difference = abs(
+        buy_score -
+        sell_score
     )
 
     direction = "WAIT"
-
-    # We deliberately require a meaningful
-    # advantage before issuing a trade.
 
     if (
         buy_score >= 7.0
         and
         buy_score > sell_score
         and
-        score_difference >= 1.5
+        difference >= 1.5
     ):
-
         direction = "BUY"
 
     elif (
@@ -521,55 +373,39 @@ def generate_signal(
         and
         sell_score > buy_score
         and
-        score_difference >= 1.5
+        difference >= 1.5
     ):
-
         direction = "SELL"
 
-
-    # =====================================================
-    # DISPLAY SCORE
-    # =====================================================
-
+    # Display score
     if direction == "BUY":
-
-        score = int(
-            round(
-                buy_score
-            )
+        score = round(
+            buy_score
         )
 
     elif direction == "SELL":
-
-        score = int(
-            round(
-                sell_score
-            )
+        score = round(
+            sell_score
         )
 
     else:
-
-        score = int(
-            round(
-                max(
-                    buy_score,
-                    sell_score
-                )
+        score = round(
+            max(
+                buy_score,
+                sell_score
             )
         )
-
 
     score = max(
         0,
         min(
             10,
-            score
+            int(score)
         )
     )
 
-
     # =====================================================
-    # RISK
+    # RISK MANAGEMENT
     # =====================================================
 
     stop_distance = (
@@ -577,13 +413,12 @@ def generate_signal(
     )
 
     target_distance = (
-        stop_distance * 3
+        stop_distance * 3.0
     )
 
+    entry = price
 
     if direction == "BUY":
-
-        entry = price
 
         sl = (
             entry -
@@ -597,8 +432,6 @@ def generate_signal(
 
     elif direction == "SELL":
 
-        entry = price
-
         sl = (
             entry +
             stop_distance
@@ -611,33 +444,44 @@ def generate_signal(
 
     else:
 
-        entry = price
-        sl = price
-        tp = price
-
+        sl = entry
+        tp = entry
 
     # =====================================================
-    # IMPORTANT:
-    # RETURN EVERY FIELD USED BY APP.PY
+    # RETURN
     # =====================================================
 
     return {
         "direction": direction,
         "score": score,
-
         "buy_score": round(
             buy_score,
             2
         ),
-
         "sell_score": round(
             sell_score,
             2
         ),
-
         "entry": round(
             entry,
             2
         ),
-
-        "sl
+        "sl": round(
+            sl,
+            2
+        ),
+        "tp": round(
+            tp,
+            2
+        ),
+        "h1_trend": h1_trend,
+        "h4_trend": h4_trend,
+        "rsi": round(
+            rsi,
+            2
+        ),
+        "atr": round(
+            atr,
+            2
+        )
+        }
