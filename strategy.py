@@ -331,26 +331,39 @@ score = max(
 
 
     # =====================================================
-    # SIGNAL THRESHOLD
-    # =====================================================
+# SIGNAL THRESHOLD
+# =====================================================
 
-    if (
-        buy_score >= 8
-        and buy_score > sell_score
-    ):
+if (
+    buy_score >= 7
+    and
+    buy_score > sell_score
+    and
+    bullish_15m
+    and
+    bullish_higher_tf
+):
 
-        direction = "BUY"
+    direction = "BUY"
 
-    elif (
-        sell_score >= 8
-        and sell_score > buy_score
-    ):
+elif (
+    sell_score >= 7
+    and
+    sell_score > buy_score
+    and
+    bearish_15m
+    and
+    bearish_higher_tf
+):
 
-        direction = "SELL"
+    direction = "SELL"
 
-    else:
+else:
 
-        direction = "WAIT"
+    direction = "WAIT"
+
+    
+        
 
 
     # =====================================================
