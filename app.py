@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import requests
 import plotly.graph_objects as go
 
@@ -8,7 +7,7 @@ from strategy import generate_signal
 
 
 # =========================================================
-# PAGE CONFIG
+# PAGE
 # =========================================================
 
 st.set_page_config(
@@ -18,19 +17,15 @@ st.set_page_config(
 )
 
 
-# =========================================================
-# TITLE
-# =========================================================
-
 st.title("Friendly Trader")
 
 st.caption(
-    "Trade Smart. Trade Friendly. — Alpha 0.9 Research Prototype"
+    "Trade Smart. Trade Friendly. — Alpha 1.0 Research Prototype"
 )
 
 
 # =========================================================
-# TWELVE DATA
+# DATA
 # =========================================================
 
 @st.cache_data(ttl=60)
@@ -43,21 +38,14 @@ def get_market_data(
         "TWELVE_DATA_API_KEY"
     ]
 
-    url = (
-        "https://api.twelvedata.com/"
-        "time_series"
-    )
-
-    params = {
-        "symbol": "XAU/USD",
-        "interval": interval,
-        "outputsize": outputsize,
-        "apikey": api_key
-    }
-
     response = requests.get(
-        url,
-        params=params,
+        "https://api.twelvedata.com/time_series",
+        params={
+            "symbol": "XAU/USD",
+            "interval": interval,
+            "outputsize": outputsize,
+            "apikey": api_key
+        },
         timeout=20
     )
 
@@ -70,7 +58,7 @@ def get_market_data(
         raise RuntimeError(
             result.get(
                 "message",
-                "Twelve Data returned no values."
+                "No market data returned."
             )
         )
 
@@ -82,15 +70,15 @@ def get_market_data(
         df["datetime"]
     )
 
-    for column in [
+    for col in [
         "open",
         "high",
         "low",
         "close"
     ]:
 
-        df[column] = pd.to_numeric(
-            df[column],
+        df[col] = pd.to_numeric(
+            df[col],
             errors="coerce"
         )
 
@@ -102,48 +90,40 @@ def get_market_data(
             "low",
             "close"
         ]
-    ]
+    ].dropna()
 
-    df = df.dropna()
-
-    df = df.sort_values(
-        "time"
-    )
-
-    return df.reset_index(
-        drop=True
+    return (
+        df
+        .sort_values("time")
+        .reset_index(drop=True)
     )
 
 
 # =========================================================
-# LOAD DATA
+# LOAD
 # =========================================================
 
 try:
 
-    with st.spinner(
-        "Loading XAU/USD market data..."
-    ):
+    df_15m = get_market_data(
+        "15min",
+        500
+    )
 
-        df_15m = get_market_data(
-            "15min",
-            500
-        )
+    df_1h = get_market_data(
+        "1h",
+        500
+    )
 
-        df_1h = get_market_data(
-            "1h",
-            500
-        )
-
-        df_4h = get_market_data(
-            "4h",
-            500
-        )
+    df_4h = get_market_data(
+        "4h",
+        500
+    )
 
 except Exception as error:
 
     st.error(
-        "Market data loading failed."
+        "Unable to load market data."
     )
 
     st.exception(error)
@@ -165,7 +145,7 @@ st.success(
 
 try:
 
-    live_signal = generate_signal(
+    signal = generate_signal(
         df_15m,
         df_1h,
         df_4h
@@ -174,7 +154,7 @@ try:
 except Exception as error:
 
     st.error(
-        "Signal generation failed."
+        "Signal engine error."
     )
 
     st.exception(error)
@@ -182,72 +162,51 @@ except Exception as error:
     st.stop()
 
 
-direction = live_signal.get(
-    "direction",
-    "WAIT"
-)
+direction = signal["direction"]
 
-score = int(
-    live_signal.get(
-        "score",
-        0
-    )
-)
+score = signal["score"]
 
-entry = float(
-    live_signal.get(
-        "entry",
-        df_15m["close"].iloc[-1]
-    )
-)
+entry = signal["entry"]
 
-sl = float(
-    live_signal.get(
-        "sl",
-        entry
-    )
-)
+sl = signal["sl"]
 
-tp = float(
-    live_signal.get(
-        "tp",
-        entry
-    )
-)
+tp = signal["tp"]
 
-h1_trend = live_signal.get(
-    "h1_trend",
-    "NEUTRAL"
-)
+h1 = signal["h1_trend"]
 
-h4_trend = live_signal.get(
-    "h4_trend",
-    "NEUTRAL"
-)
+h4 = signal["h4_trend"]
+
+rsi = signal["rsi"]
+
+atr = signal["atr"]
+
+buy_score = signal["buy_score"]
+
+sell_score = signal["sell_score"]
 
 
 # =========================================================
-# TOP METRICS
+# METRICS
 # =========================================================
 
-m1, m2, m3, m4 = st.columns(4)
+a, b, c, d = st.columns(4)
 
-m1.metric(
+a.metric(
     "XAUUSD",
     f"${df_15m['close'].iloc[-1]:,.2f}"
 )
 
-m2.metric(
+b.metric(
     "Signal",
     direction
 )
 
-m3.metric(
+c.metric(
     "Score",
     f"{score}/10"
 )
 
-m4.metric(
+d.metric(
     "Risk / Reward",
     "1:3"
 )
@@ -261,17 +220,17 @@ st.subheader(
     "📊 XAUUSD 15-Minute Chart"
 )
 
-chart_df = df_15m.tail(200)
+chart = df_15m.tail(200)
 
 fig = go.Figure()
 
 fig.add_trace(
     go.Candlestick(
-        x=chart_df["time"],
-        open=chart_df["open"],
-        high=chart_df["high"],
-        low=chart_df["low"],
-        close=chart_df["close"],
+        x=chart["time"],
+        open=chart["open"],
+        high=chart["high"],
+        low=chart["low"],
+        close=chart["close"],
         name="XAUUSD"
     )
 )
@@ -288,7 +247,7 @@ st.plotly_chart(
 
 
 # =========================================================
-# SIGNAL DETAILS
+# SIGNAL
 # =========================================================
 
 st.subheader(
@@ -299,19 +258,19 @@ st.markdown(
     f"## {direction}"
 )
 
-p1, p2, p3 = st.columns(3)
+x, y, z = st.columns(3)
 
-p1.metric(
+x.metric(
     "Entry",
     f"{entry:.2f}"
 )
 
-p2.metric(
+y.metric(
     "Stop Loss",
     f"{sl:.2f}"
 )
 
-p3.metric(
+z.metric(
     "Take Profit",
     f"{tp:.2f}"
 )
@@ -321,18 +280,34 @@ st.write(
 )
 
 st.write(
-    f"**1H Trend:** {h1_trend}"
+    f"**BUY Score:** {buy_score}/10"
 )
 
 st.write(
-    f"**4H Trend:** {h4_trend}"
+    f"**SELL Score:** {sell_score}/10"
+)
+
+st.write(
+    f"**RSI:** {rsi}"
+)
+
+st.write(
+    f"**ATR:** {atr}"
+)
+
+st.write(
+    f"**1H Trend:** {h1}"
+)
+
+st.write(
+    f"**4H Trend:** {h4}"
 )
 
 if direction == "WAIT":
 
     st.warning(
-        "No high-quality setup currently. "
-        "Wait for confirmation."
+        "No sufficiently strong setup. "
+        "Waiting for better confirmation."
     )
 
 else:
@@ -353,24 +328,24 @@ st.subheader(
     "📡 Market Data"
 )
 
-d1, d2, d3, d4 = st.columns(4)
+m1, m2, m3, m4 = st.columns(4)
 
-d1.metric(
+m1.metric(
     "15M Candles",
     len(df_15m)
 )
 
-d2.metric(
+m2.metric(
     "1H Candles",
     len(df_1h)
 )
 
-d3.metric(
+m3.metric(
     "4H Candles",
     len(df_4h)
 )
 
-d4.metric(
+m4.metric(
     "Source",
     "Twelve Data"
 )
@@ -383,11 +358,11 @@ d4.metric(
 st.divider()
 
 st.subheader(
-    "🧪 50-Trade Research Backtest"
+    "🧪 Alpha 1.0 Research Backtest"
 )
 
 
-def run_same_strategy_backtest(
+def run_backtest(
     df_15m,
     df_1h,
     df_4h
@@ -395,78 +370,52 @@ def run_same_strategy_backtest(
 
     results = []
 
-    total_candles = len(
-        df_15m
-    )
+    minimum_15m = 220
 
-    # We need enough future candles
-    # to determine whether SL or TP
-    # was hit.
-
-    max_index = (
-        total_candles - 21
-    )
-
-    if max_index <= 0:
-
-        return results
-
+    horizon = 20
 
     for i in range(
-        max_index
+        minimum_15m,
+        len(df_15m) - horizon
     ):
-
-        if len(results) >= 50:
-
-            break
-
 
         current_15m = (
             df_15m.iloc[
-                : i + 1
-            ].copy()
+                :i + 1
+            ]
+            .copy()
         )
-
-
-        if len(current_15m) < 50:
-
-            continue
-
 
         current_time = (
             current_15m["time"].iloc[-1]
         )
 
 
-        # Only use higher-timeframe
-        # candles that already existed
-        # at the moment of the signal.
-
         current_1h = (
             df_1h[
                 df_1h["time"] <= current_time
-            ].copy()
+            ]
+            .copy()
         )
 
         current_4h = (
             df_4h[
                 df_4h["time"] <= current_time
-            ].copy()
+            ]
+            .copy()
         )
 
 
-        if len(current_1h) < 50:
-
+        if len(current_1h) < 220:
             continue
 
-        if len(current_4h) < 50:
-
+        if len(current_4h) < 220:
             continue
 
 
         try:
 
-            signal = generate_signal(
+            s = generate_signal(
                 current_15m,
                 current_1h,
                 current_4h
@@ -477,48 +426,43 @@ def run_same_strategy_backtest(
             continue
 
 
-        direction_bt = signal.get(
-            "direction",
-            "WAIT"
-        )
+        direction = s["direction"]
 
 
-        if direction_bt not in [
-            "BUY",
-            "SELL"
-        ]:
-
+        if direction == "WAIT":
             continue
 
 
-        entry_bt = float(
-            signal["entry"]
+        entry = float(
+            s["entry"]
         )
 
-        sl_bt = float(
-            signal["sl"]
+        sl = float(
+            s["sl"]
         )
 
-        tp_bt = float(
-            signal["tp"]
+        tp = float(
+            s["tp"]
         )
 
-
-        # -------------------------------------------------
-        # Future candles
-        # -------------------------------------------------
 
         future = df_15m.iloc[
             i + 1 :
-            i + 21
+            i + 1 + horizon
         ]
 
 
-        result_r = None
+        result = "TIMEOUT"
 
-        exit_price = None
+        result_r = 0.0
 
-        exit_time = None
+        exit_price = float(
+            future["close"].iloc[-1]
+        )
+
+        exit_time = (
+            future["time"].iloc[-1]
+        )
 
 
         for _, candle in future.iterrows():
@@ -532,105 +476,87 @@ def run_same_strategy_backtest(
             )
 
 
-            if direction_bt == "BUY":
+            if direction == "BUY":
 
-                stop_hit = (
-                    low <= sl_bt
+                hit_sl = (
+                    low <= sl
                 )
 
-                target_hit = (
-                    high >= tp_bt
+                hit_tp = (
+                    high >= tp
                 )
-
-
-                # Conservative rule:
-                # if both are touched inside
-                # the same candle, assume SL
-                # happened first.
-
-                if stop_hit:
-
-                    result_r = -1.0
-
-                    exit_price = sl_bt
-
-                    exit_time = candle["time"]
-
-                    break
-
-
-                if target_hit:
-
-                    result_r = 3.0
-
-                    exit_price = tp_bt
-
-                    exit_time = candle["time"]
-
-                    break
-
 
             else:
 
-                stop_hit = (
-                    high >= sl_bt
+                hit_sl = (
+                    high >= sl
                 )
 
-                target_hit = (
-                    low <= tp_bt
+                hit_tp = (
+                    low <= tp
                 )
 
 
-                if stop_hit:
+            if hit_sl and hit_tp:
 
-                    result_r = -1.0
+                result = "LOSS"
 
-                    exit_price = sl_bt
+                result_r = -1.0
 
-                    exit_time = candle["time"]
+                exit_price = sl
 
-                    break
+                exit_time = candle["time"]
 
-
-                if target_hit:
-
-                    result_r = 3.0
-
-                    exit_price = tp_bt
-
-                    exit_time = candle["time"]
-
-                    break
+                break
 
 
-        if result_r is None:
+            if hit_sl:
 
-            continue
+                result = "LOSS"
+
+                result_r = -1.0
+
+                exit_price = sl
+
+                exit_time = candle["time"]
+
+                break
+
+
+            if hit_tp:
+
+                result = "WIN"
+
+                result_r = 3.0
+
+                exit_price = tp
+
+                exit_time = candle["time"]
+
+                break
 
 
         results.append(
             {
                 "Signal Time": current_time,
-                "Direction": direction_bt,
-                "Score": int(
-                    signal.get(
-                        "score",
-                        0
-                    )
-                ),
+                "Direction": direction,
+                "Score": s["score"],
+                "BUY Score": s["buy_score"],
+                "SELL Score": s["sell_score"],
                 "Entry": round(
-                    entry_bt,
+                    entry,
                     2
                 ),
-                "Stop Loss": round(
-                    sl_bt,
+                "SL": round(
+                    sl,
                     2
                 ),
-                "Take Profit": round(
-                    tp_bt,
+                "TP": round(
+                    tp,
                     2
                 ),
-                "Result R": result_r,
+                "Result": result,
+                "R": result_r,
                 "Exit Time": exit_time,
                 "Exit Price": round(
                     exit_price,
@@ -644,41 +570,38 @@ def run_same_strategy_backtest(
 
 
 # =========================================================
-# RUN
+# EXECUTE
 # =========================================================
 
 try:
 
     with st.spinner(
-        "Running the same Alpha 0.9 strategy "
-        "through historical candles..."
+        "Running Alpha 1.0 research backtest..."
     ):
 
-        backtest_results = (
-            run_same_strategy_backtest(
-                df_15m,
-                df_1h,
-                df_4h
-            )
+        results = run_backtest(
+            df_15m,
+            df_1h,
+            df_4h
         )
 
 
-    if not backtest_results:
+    if not results:
 
         st.warning(
-            "No completed qualifying trades "
-            "were found in the available data."
+            "No qualifying signals were found "
+            "in the available historical sample."
         )
 
     else:
 
         journal = pd.DataFrame(
-            backtest_results
+            results
         )
 
 
         # -------------------------------------------------
-        # PERFORMANCE
+        # STATS
         # -------------------------------------------------
 
         trades = len(
@@ -686,40 +609,39 @@ try:
         )
 
         wins = (
-            journal["Result R"] > 0
+            journal["Result"] == "WIN"
         ).sum()
 
         losses = (
-            journal["Result R"] < 0
+            journal["Result"] == "LOSS"
         ).sum()
 
+        timeouts = (
+            journal["Result"] == "TIMEOUT"
+        ).sum()
+
+
         win_rate = (
-            wins /
-            trades
-        ) * 100
+            wins / trades * 100
+        )
 
 
         net_r = (
-            journal["Result R"]
-            .sum()
+            journal["R"].sum()
         )
 
 
-        gross_profit = (
-            journal.loc[
-                journal["Result R"] > 0,
-                "Result R"
-            ]
-            .sum()
-        )
+        gross_profit = journal.loc[
+            journal["R"] > 0,
+            "R"
+        ].sum()
 
 
         gross_loss = abs(
             journal.loc[
-                journal["Result R"] < 0,
-                "Result R"
-            ]
-            .sum()
+                journal["R"] < 0,
+                "R"
+            ].sum()
         )
 
 
@@ -732,25 +654,29 @@ try:
 
         else:
 
-            profit_factor = 0.0
+            profit_factor = float(
+                "inf"
+            )
 
 
-        # -------------------------------------------------
-        # EQUITY / DRAWDOWN
-        # -------------------------------------------------
+        expectancy = (
+            net_r /
+            trades
+        )
+
 
         equity = (
-            journal["Result R"]
+            journal["R"]
             .cumsum()
         )
 
-        running_peak = (
+        peak = (
             equity.cummax()
         )
 
         drawdown = (
             equity -
-            running_peak
+            peak
         )
 
         max_drawdown = (
@@ -759,48 +685,94 @@ try:
 
 
         # -------------------------------------------------
+        # LOSING STREAK
+        # -------------------------------------------------
+
+        max_losing_streak = 0
+
+        current_losing_streak = 0
+
+        for r in journal["R"]:
+
+            if r < 0:
+
+                current_losing_streak += 1
+
+                max_losing_streak = max(
+                    max_losing_streak,
+                    current_losing_streak
+                )
+
+            else:
+
+                current_losing_streak = 0
+
+
+        # -------------------------------------------------
         # DISPLAY
         # -------------------------------------------------
 
-        b1, b2, b3, b4, b5 = st.columns(5)
+        q1, q2, q3, q4, q5 = st.columns(5)
 
-        b1.metric(
+        q1.metric(
             "Trades",
             trades
         )
 
-        b2.metric(
+        q2.metric(
             "Win Rate",
             f"{win_rate:.1f}%"
         )
 
-        b3.metric(
+        q3.metric(
             "Net R",
             f"{net_r:.2f}R"
         )
 
-        b4.metric(
+        q4.metric(
             "Profit Factor",
-            f"{profit_factor:.2f}"
+            (
+                "∞"
+                if profit_factor == float("inf")
+                else f"{profit_factor:.2f}"
+            )
         )
 
-        b5.metric(
+        q5.metric(
             "Max Drawdown",
             f"{max_drawdown:.2f}R"
         )
 
 
+        r1, r2, r3 = st.columns(3)
+
+        r1.metric(
+            "Expectancy",
+            f"{expectancy:.3f}R/trade"
+        )
+
+        r2.metric(
+            "Timeouts",
+            timeouts
+        )
+
+        r3.metric(
+            "Max Losing Streak",
+            max_losing_streak
+        )
+
+
         # -------------------------------------------------
-        # EQUITY CURVE
+        # EQUITY
         # -------------------------------------------------
 
         st.subheader(
             "📈 Research Equity Curve"
         )
 
-        equity_chart = go.Figure()
+        equity_fig = go.Figure()
 
-        equity_chart.add_trace(
+        equity_fig.add_trace(
             go.Scatter(
                 x=list(
                     range(
@@ -810,18 +782,18 @@ try:
                 ),
                 y=equity,
                 mode="lines+markers",
-                name="Net R"
+                name="Cumulative R"
             )
         )
 
-        equity_chart.update_layout(
+        equity_fig.update_layout(
             height=350,
             xaxis_title="Trade",
-            yaxis_title="Cumulative R"
+            yaxis_title="R"
         )
 
         st.plotly_chart(
-            equity_chart,
+            equity_fig,
             use_container_width=True
         )
 
@@ -844,7 +816,7 @@ try:
 except Exception as error:
 
     st.error(
-        "Backtest failed."
+        "Backtest error."
     )
 
     st.exception(error)
@@ -857,10 +829,8 @@ except Exception as error:
 st.divider()
 
 st.caption(
-    "Alpha 0.9 is a research prototype. "
-    "The backtest uses the same signal engine "
-    "as the live dashboard. "
-    "Results are research results only and "
-    "are not proof of future performance. "
-    "Real-money execution is disabled."
+    "Alpha 1.0 is a research prototype. "
+    "This system does not execute real trades. "
+    "Backtest results are historical research only "
+    "and are not proof of future performance."
     )
