@@ -7,22 +7,25 @@ import requests
 from strategy import generate_signal
 
 
+# =========================================================
+# PAGE
+# =========================================================
+
 st.set_page_config(
     page_title="Friendly Trader",
     page_icon="📈",
     layout="wide"
 )
 
-
 st.title("Friendly Trader")
 
 st.caption(
-    "Trade Smart. Trade Friendly. — Alpha 0.7"
+    "Trade Smart. Trade Friendly. — Alpha 0.8 Research Prototype"
 )
 
 
 # =========================================================
-# MARKET DATA
+# DATA
 # =========================================================
 
 @st.cache_data(ttl=60)
@@ -47,26 +50,26 @@ def get_data(interval, outputsize):
 
     response.raise_for_status()
 
-    data = response.json()
+    result = response.json()
 
-    if "values" not in data:
-        raise RuntimeError(data)
+    if "values" not in result:
+        raise RuntimeError(result)
 
-    df = pd.DataFrame(data["values"])
+    df = pd.DataFrame(result["values"])
 
     df["time"] = pd.to_datetime(
         df["datetime"]
     )
 
-    for col in [
+    for column in [
         "open",
         "high",
         "low",
         "close"
     ]:
 
-        df[col] = pd.to_numeric(
-            df[col],
+        df[column] = pd.to_numeric(
+            df[column],
             errors="coerce"
         )
 
@@ -92,7 +95,7 @@ def get_data(interval, outputsize):
 
 
 # =========================================================
-# LOAD REAL DATA
+# LOAD MARKET DATA
 # =========================================================
 
 with st.spinner(
@@ -116,13 +119,13 @@ with st.spinner(
             500
         )
 
-    except Exception as e:
+    except Exception as error:
 
         st.error(
-            "Market data error"
+            "Market data loading failed."
         )
 
-        st.exception(e)
+        st.exception(error)
 
         st.stop()
 
@@ -147,13 +150,13 @@ try:
         df_4h
     )
 
-except Exception as e:
+except Exception as error:
 
     st.error(
-        "Signal generation error"
+        "Signal generation failed."
     )
 
-    st.exception(e)
+    st.exception(error)
 
     st.stop()
 
@@ -192,7 +195,6 @@ c4.metric(
 left, right = st.columns(
     [2.2, 1]
 )
-
 
 with left:
 
@@ -272,6 +274,19 @@ with right:
         f"{signal.get('h4_trend', 'N/A')}"
     )
 
+    if signal["direction"] == "WAIT":
+
+        st.warning(
+            "Weak setup — wait for confirmation."
+        )
+
+    else:
+
+        st.info(
+            "Research signal only. "
+            "Real-money execution is disabled."
+        )
+
 
 # =========================================================
 # MARKET DATA
@@ -284,6 +299,7 @@ st.subheader(
 )
 
 d1, d2, d3, d4 = st.columns(4)
+
 d1.metric(
     "15M Candles",
     len(df_15m)
@@ -292,15 +308,3 @@ d1.metric(
 d2.metric(
     "1H Candles",
     len(df_1h)
-)
-
-d3.metric(
-    "4H Candles",
-    len(df_4h)
-)
-
-d4.metric(
-    "Source",
-    "Twelve Data"
-)
-
