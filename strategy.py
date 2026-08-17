@@ -2,6 +2,12 @@ import numpy as np
 import pandas as pd
 
 
+# =========================================================
+# FRIENDLY TRADER — ALPHA 1.1
+# Balanced scoring engine
+# =========================================================
+
+
 def prepare_indicators(df):
 
     data = df.copy()
@@ -15,7 +21,9 @@ def prepare_indicators(df):
     ]
 
     for column in required:
+
         if column not in data.columns:
+
             raise ValueError(
                 f"Missing required column: {column}"
             )
@@ -30,20 +38,23 @@ def prepare_indicators(df):
         "low",
         "close",
     ]:
+
         data[column] = pd.to_numeric(
             data[column],
             errors="coerce"
         )
 
-    data = data.dropna().copy()
-
-    data = data.sort_values(
-        "time"
-    ).reset_index(
-        drop=True
+    data = (
+        data
+        .dropna()
+        .sort_values("time")
+        .reset_index(drop=True)
     )
 
+    # =====================================================
     # EMA
+    # =====================================================
+
     data["ema20"] = (
         data["close"]
         .ewm(
@@ -71,7 +82,10 @@ def prepare_indicators(df):
         .mean()
     )
 
+    # =====================================================
     # RSI
+    # =====================================================
+
     delta = data["close"].diff()
 
     gain = delta.clip(
@@ -82,19 +96,19 @@ def prepare_indicators(df):
         upper=0
     )
 
-    average_gain = gain.ewm(
+    avg_gain = gain.ewm(
         alpha=1 / 14,
         adjust=False
     ).mean()
 
-    average_loss = loss.ewm(
+    avg_loss = loss.ewm(
         alpha=1 / 14,
         adjust=False
     ).mean()
 
     rs = (
-        average_gain /
-        average_loss.replace(
+        avg_gain /
+        avg_loss.replace(
             0,
             np.nan
         )
@@ -108,48 +122,91 @@ def prepare_indicators(df):
         )
     )
 
+    # =====================================================
     # ATR
+    # =====================================================
+
     previous_close = (
         data["close"].shift(1)
     )
 
-    range_1 = (
+    tr1 = (
         data["high"] -
         data["low"]
     )
 
-    range_2 = (
+    tr2 = (
         data["high"] -
         previous_close
     ).abs()
 
-    range_3 = (
+    tr3 = (
         data["low"] -
         previous_close
     ).abs()
 
     true_range = pd.concat(
         [
-            range_1,
-            range_2,
-            range_3,
+            tr1,
+            tr2,
+            tr3,
         ],
         axis=1
     ).max(axis=1)
 
-    data["atr"] = true_range.ewm(
-        alpha=1 / 14,
-        adjust=False
-    ).mean()
+    data["atr"] = (
+        true_range
+        .ewm(
+            alpha=1 / 14,
+            adjust=False
+        )
+        .mean()
+    )
 
-    # Momentum
+    # =====================================================
+    # MOMENTUM
+    # =====================================================
+
     data["roc5"] = (
         data["close"]
         .pct_change(5)
         * 100
     )
 
+    data["roc10"] = (
+        data["close"]
+        .pct_change(10)
+        * 100
+    )
+
+    # =====================================================
+    # CANDLE
+    # =====================================================
+
+    data["body"] = (
+        data["close"] -
+        data["open"]
+    )
+
+    data["range"] = (
+        data["high"] -
+        data["low"]
+    )
+
+    data["body_ratio"] = (
+        data["body"].abs() /
+        data["range"].replace(
+            0,
+            np.nan
+        )
+    )
+
     return data
+
+
+# =========================================================
+# TREND
+# =========================================================
 
 
 def get_trend(df):
@@ -158,7 +215,8 @@ def get_trend(df):
         df
     ).dropna()
 
-    if len(data) < 20:
+    if len(data) < 50:
+
         return "NEUTRAL"
 
     row = data.iloc[-1]
@@ -168,6 +226,7 @@ def get_trend(df):
         row["ema50"] >
         row["ema200"]
     ):
+
         return "BULLISH"
 
     if (
@@ -175,12 +234,18 @@ def get_trend(df):
         row["ema50"] <
         row["ema200"]
     ):
+
         return "BEARISH"
 
     return "NEUTRAL"
 
 
-def limit_score(value):
+# =========================================================
+# SAFE SCORE
+# =========================================================
+
+
+def clamp_score(value):
 
     return max(
         0.0,
@@ -189,6 +254,11 @@ def limit_score(value):
             float(value)
         )
     )
+
+
+# =========================================================
+# SIGNAL
+# =========================================================
 
 
 def generate_signal(
@@ -202,8 +272,10 @@ def generate_signal(
     ).dropna()
 
     if len(data) < 200:
+
         raise ValueError(
-            "Not enough 15M candles."
+            "At least 200 valid 15M candles "
+            "are required."
         )
 
     row = data.iloc[-1]
@@ -238,250 +310,22 @@ def generate_signal(
         row["roc5"]
     )
 
-    if not np.isfinite(atr) or atr <= 0:
-        atr = price * 0.001
+    roc10 = float(
+        row["roc10"]
+    )
+
+    body_ratio = float(
+        row["body_ratio"]
+    )
 
     if not np.isfinite(rsi):
+
         rsi = 50.0
 
-    if not np.isfinite(roc5):
-        roc5 = 0.0
-
-    # Higher timeframe trend
-    h1_trend = get_trend(
-        df_1h
-    )
-
-    h4_trend = get_trend(
-        df_4h
-    )
-
-    # =====================================================
-    # BUY SCORE
-    # =====================================================
-
-    buy_score = 0.0
-
-    if ema20 > ema50:
-        buy_score += 1.5
-
-    if ema50 > ema200:
-        buy_score += 1.5
-
-    if h1_trend == "BULLISH":
-        buy_score += 2.0
-
-    elif h1_trend == "NEUTRAL":
-        buy_score += 0.5
-
-    if h4_trend == "BULLISH":
-        buy_score += 2.0
-
-    elif h4_trend == "NEUTRAL":
-        buy_score += 0.5
-
-    if 52 <= rsi <= 65:
-        buy_score += 1.5
-
-    elif 50 <= rsi < 52:
-        buy_score += 0.5
-
-    elif rsi > 70:
-        buy_score -= 1.5
-
-    if roc5 > 0:
-        buy_score += 0.75
-
-    if price > ema20:
-        buy_score += 0.5
-
-    if row["close"] > row["open"]:
-        buy_score += 0.25
-
-    # =====================================================
-    # SELL SCORE
-    # =====================================================
-
-    sell_score = 0.0
-
-    if ema20 < ema50:
-        sell_score += 1.5
-
-    if ema50 < ema200:
-        sell_score += 1.5
-
-    if h1_trend == "BEARISH":
-        sell_score += 2.0
-
-    elif h1_trend == "NEUTRAL":
-        sell_score += 0.5
-
-    if h4_trend == "BEARISH":
-        sell_score += 2.0
-
-    elif h4_trend == "NEUTRAL":
-        sell_score += 0.5
-
-    if 35 <= rsi <= 48:
-        sell_score += 1.5
-
-    elif 48 < rsi <= 50:
-        sell_score += 0.5
-
-    elif rsi < 30:
-        sell_score -= 1.5
-
-    if roc5 < 0:
-        sell_score += 0.75
-
-    if price < ema20:
-        sell_score += 0.5
-
-    if row["close"] < row["open"]:
-        sell_score += 0.25
-
-    buy_score = limit_score(
-        buy_score
-    )
-
-    sell_score = limit_score(
-        sell_score
-    )
-
-    # =====================================================
-    # SIGNAL FILTER
-    # =====================================================
-
-    difference = abs(
-        buy_score -
-        sell_score
-    )
-
-    direction = "WAIT"
-
     if (
-        buy_score >= 7.0
-        and
-        buy_score > sell_score
-        and
-        difference >= 1.5
+        not np.isfinite(atr)
+        or
+        atr <= 0
     ):
-        direction = "BUY"
 
-    elif (
-        sell_score >= 7.0
-        and
-        sell_score > buy_score
-        and
-        difference >= 1.5
-    ):
-        direction = "SELL"
-
-    # Display score
-    if direction == "BUY":
-        score = round(
-            buy_score
-        )
-
-    elif direction == "SELL":
-        score = round(
-            sell_score
-        )
-
-    else:
-        score = round(
-            max(
-                buy_score,
-                sell_score
-            )
-        )
-
-    score = max(
-        0,
-        min(
-            10,
-            int(score)
-        )
-    )
-
-    # =====================================================
-    # RISK MANAGEMENT
-    # =====================================================
-
-    stop_distance = (
-        atr * 1.5
-    )
-
-    target_distance = (
-        stop_distance * 3.0
-    )
-
-    entry = price
-
-    if direction == "BUY":
-
-        sl = (
-            entry -
-            stop_distance
-        )
-
-        tp = (
-            entry +
-            target_distance
-        )
-
-    elif direction == "SELL":
-
-        sl = (
-            entry +
-            stop_distance
-        )
-
-        tp = (
-            entry -
-            target_distance
-        )
-
-    else:
-
-        sl = entry
-        tp = entry
-
-    # =====================================================
-    # RETURN
-    # =====================================================
-
-    return {
-        "direction": direction,
-        "score": score,
-        "buy_score": round(
-            buy_score,
-            2
-        ),
-        "sell_score": round(
-            sell_score,
-            2
-        ),
-        "entry": round(
-            entry,
-            2
-        ),
-        "sl": round(
-            sl,
-            2
-        ),
-        "tp": round(
-            tp,
-            2
-        ),
-        "h1_trend": h1_trend,
-        "h4_trend": h4_trend,
-        "rsi": round(
-            rsi,
-            2
-        ),
-        "atr": round(
-            atr,
-            2
-        )
-        }
+        atr = price *
