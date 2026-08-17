@@ -16,10 +16,13 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("Friendly Trader")
+st.title(
+    "Friendly Trader"
+)
 
 st.caption(
-    "Trade Smart. Trade Friendly. — Alpha 1.1 Research Prototype"
+    "Trade Smart. Trade Friendly. — "
+    "Alpha 1.2 Research Prototype"
 )
 
 
@@ -28,9 +31,14 @@ st.caption(
 # =========================================================
 
 @st.cache_data(ttl=60)
-def get_market_data(interval, outputsize):
+def get_market_data(
+    interval,
+    outputsize
+):
 
-    api_key = st.secrets["TWELVE_DATA_API_KEY"]
+    api_key = st.secrets[
+        "TWELVE_DATA_API_KEY"
+    ]
 
     response = requests.get(
         "https://api.twelvedata.com/time_series",
@@ -48,6 +56,7 @@ def get_market_data(interval, outputsize):
     result = response.json()
 
     if "values" not in result:
+
         raise RuntimeError(
             result.get(
                 "message",
@@ -55,7 +64,9 @@ def get_market_data(interval, outputsize):
             )
         )
 
-    df = pd.DataFrame(result["values"])
+    df = pd.DataFrame(
+        result["values"]
+    )
 
     df["time"] = pd.to_datetime(
         df["datetime"]
@@ -67,6 +78,7 @@ def get_market_data(interval, outputsize):
         "low",
         "close"
     ]:
+
         df[column] = pd.to_numeric(
             df[column],
             errors="coerce"
@@ -137,7 +149,7 @@ st.success(
 
 
 # =========================================================
-# SIGNAL
+# LIVE SIGNAL
 # =========================================================
 
 try:
@@ -159,45 +171,107 @@ except Exception as error:
     st.stop()
 
 
-direction = signal["direction"]
-score = signal["score"]
-entry = signal["entry"]
-sl = signal["sl"]
-tp = signal["tp"]
+direction = signal.get(
+    "direction",
+    "WAIT"
+)
 
-buy_score = signal["buy_score"]
-sell_score = signal["sell_score"]
+score = int(
+    signal.get(
+        "score",
+        0
+    )
+)
 
-h1_trend = signal["h1_trend"]
-h4_trend = signal["h4_trend"]
+entry = float(
+    signal.get(
+        "entry",
+        df_15m["close"].iloc[-1]
+    )
+)
 
-rsi = signal["rsi"]
-atr = signal["atr"]
-momentum = signal["momentum"]
+sl = float(
+    signal.get(
+        "sl",
+        entry
+    )
+)
+
+tp = float(
+    signal.get(
+        "tp",
+        entry
+    )
+)
+
+buy_score = float(
+    signal.get(
+        "buy_score",
+        0
+    )
+)
+
+sell_score = float(
+    signal.get(
+        "sell_score",
+        0
+    )
+)
+
+rsi = float(
+    signal.get(
+        "rsi",
+        50
+    )
+)
+
+atr = float(
+    signal.get(
+        "atr",
+        0
+    )
+)
+
+momentum = float(
+    signal.get(
+        "momentum",
+        0
+    )
+)
+
+h1_trend = signal.get(
+    "h1_trend",
+    "NEUTRAL"
+)
+
+h4_trend = signal.get(
+    "h4_trend",
+    "NEUTRAL"
+)
 
 
 # =========================================================
 # TOP METRICS
 # =========================================================
 
-c1, c2, c3, c4 = st.columns(4)
+m1, m2, m3, m4 = st.columns(4)
 
-c1.metric(
+m1.metric(
     "XAUUSD",
     f"${df_15m['close'].iloc[-1]:,.2f}"
 )
 
-c2.metric(
+m2.metric(
     "Signal",
     direction
 )
 
-c3.metric(
+m3.metric(
     "Score",
     f"{score}/10"
 )
 
-c4.metric(
+m4.metric(
     "Risk / Reward",
     "1:3"
 )
@@ -271,23 +345,23 @@ st.write(
 )
 
 st.write(
-    f"**BUY Score:** {buy_score}/10"
+    f"**BUY Score:** {buy_score:.2f}/10"
 )
 
 st.write(
-    f"**SELL Score:** {sell_score}/10"
+    f"**SELL Score:** {sell_score:.2f}/10"
 )
 
 st.write(
-    f"**RSI:** {rsi}"
+    f"**RSI:** {rsi:.2f}"
 )
 
 st.write(
-    f"**ATR:** {atr}"
+    f"**ATR:** {atr:.2f}"
 )
 
 st.write(
-    f"**Momentum:** {momentum}%"
+    f"**Momentum:** {momentum:.2f}"
 )
 
 st.write(
@@ -358,7 +432,7 @@ st.subheader(
 )
 
 
- def run_backtest(
+def run_backtest(
     df_15m,
     df_1h,
     df_4h
@@ -367,9 +441,13 @@ st.subheader(
     results = []
 
     minimum_candles = 220
+
     horizon = 20
 
-    last_index = len(df_15m) - horizon
+    last_index = (
+        len(df_15m) -
+        horizon
+    )
 
     for i in range(
         minimum_candles,
@@ -408,40 +486,38 @@ st.subheader(
 
         try:
 
-            signal = generate_signal(
+            s = generate_signal(
                 current_15m,
                 current_1h,
                 current_4h
             )
 
         except Exception:
+
             continue
 
-        direction = signal.get(
+        direction_bt = s.get(
             "direction",
             "WAIT"
         )
 
-        # -------------------------------------------------
-        # WAIT IS NOT A TRADE
-        # -------------------------------------------------
-
-        if direction not in [
+        if direction_bt not in [
             "BUY",
             "SELL"
         ]:
+
             continue
 
-        entry = float(
-            signal["entry"]
+        entry_bt = float(
+            s["entry"]
         )
 
-        stop = float(
-            signal["sl"]
+        stop_bt = float(
+            s["sl"]
         )
 
-        target = float(
-            signal["tp"]
+        target_bt = float(
+            s["tp"]
         )
 
         future = df_15m.iloc[
@@ -464,10 +540,6 @@ st.subheader(
             future["time"].iloc[-1]
         )
 
-        # -------------------------------------------------
-        # CHECK FUTURE PRICE ACTION
-        # -------------------------------------------------
-
         for _, candle in future.iterrows():
 
             high = float(
@@ -478,29 +550,25 @@ st.subheader(
                 candle["low"]
             )
 
-            if direction == "BUY":
+            if direction_bt == "BUY":
 
                 stop_hit = (
-                    low <= stop
+                    low <= stop_bt
                 )
 
                 target_hit = (
-                    high >= target
+                    high >= target_bt
                 )
 
             else:
 
                 stop_hit = (
-                    high >= stop
+                    high >= stop_bt
                 )
 
                 target_hit = (
-                    low <= target
+                    low <= target_bt
                 )
-
-            # Conservative assumption:
-            # if SL and TP are both touched
-            # in one candle, SL happens first.
 
             if (
                 stop_hit
@@ -511,7 +579,7 @@ st.subheader(
 
                 result_r = -1.0
 
-                exit_price = stop
+                exit_price = stop_bt
 
                 exit_time = candle["time"]
 
@@ -523,7 +591,7 @@ st.subheader(
 
                 result_r = -1.0
 
-                exit_price = stop
+                exit_price = stop_bt
 
                 exit_time = candle["time"]
 
@@ -535,85 +603,67 @@ st.subheader(
 
                 result_r = 3.0
 
-                exit_price = target
+                exit_price = target_bt
 
                 exit_time = candle["time"]
 
                 break
 
-        # -------------------------------------------------
-        # SAVE TRADE
-        # -------------------------------------------------
-
         results.append(
             {
                 "Signal Time": current_time,
-
-                "Direction": direction,
-
+                "Direction": direction_bt,
                 "Score": int(
-                    signal.get(
+                    s.get(
                         "score",
                         0
                     )
                 ),
-
                 "BUY Score": float(
-                    signal.get(
+                    s.get(
                         "buy_score",
                         0
                     )
                 ),
-
                 "SELL Score": float(
-                    signal.get(
+                    s.get(
                         "sell_score",
                         0
                     )
                 ),
-
                 "RSI": float(
-                    signal.get(
+                    s.get(
                         "rsi",
                         50
                     )
                 ),
-
                 "Momentum": float(
-                    signal.get(
+                    s.get(
                         "momentum",
                         0
                     )
                 ),
-
                 "ATR": float(
-                    signal.get(
+                    s.get(
                         "atr",
                         0
                     )
                 ),
-
                 "Entry": round(
-                    entry,
+                    entry_bt,
                     2
                 ),
-
                 "SL": round(
-                    stop,
+                    stop_bt,
                     2
                 ),
-
                 "TP": round(
-                    target,
+                    target_bt,
                     2
                 ),
-
                 "Result": result,
-
                 "R": result_r,
-
                 "Exit Time": exit_time,
-
                 "Exit Price": round(
                     exit_price,
                     2
@@ -623,32 +673,409 @@ st.subheader(
 
     return results
 
-    
-            
-        
-            
 
-            
-                
-                
-        
+# =========================================================
+# RUN BACKTEST
+# =========================================================
 
-        
-        
+try:
 
-            
-        
+    with st.spinner(
+        "Running Alpha 1.2 research backtest..."
+    ):
 
-        
-        
-        
-        
-        
+        results = run_backtest(
+            df_15m,
+            df_1h,
+            df_4h
+        )
 
-        
-        
+    if not results:
+
+        st.warning(
+            "No qualifying trades were found "
+            "in the available historical data."
+        )
+
+    else:
+
+        journal = pd.DataFrame(
+            results
+        )
+
+        # -------------------------------------------------
+        # OVERALL STATISTICS
+        # -------------------------------------------------
+
+        trades = len(
+            journal
+        )
+
+        wins = (
+            journal["Result"] == "WIN"
+        ).sum()
+
+        losses = (
+            journal["Result"] == "LOSS"
+        ).sum()
+
+        timeouts = (
+            journal["Result"] == "TIMEOUT"
+        ).sum()
+
+        win_rate = (
+            wins /
+            trades *
+            100
+        )
+
+        net_r = (
+            journal["R"].sum()
+        )
+
+        gross_profit = (
+            journal.loc[
+                journal["R"] > 0,
+                "R"
+            ].sum()
+        )
+
+        gross_loss = abs(
+            journal.loc[
+                journal["R"] < 0,
+                "R"
+            ].sum()
+        )
+
+        if gross_loss > 0:
+
+            profit_factor = (
+                gross_profit /
+                gross_loss
+            )
+
+        else:
+
+            profit_factor = float(
+                "inf"
+            )
+
+        expectancy = (
+            net_r /
+            trades
+        )
+
+        equity = (
+            journal["R"]
+            .cumsum()
+        )
+
+        peak = (
+            equity.cummax()
+        )
+
+        drawdown = (
+            equity -
+            peak
+        )
+
+        max_drawdown = (
+            drawdown.min()
+        )
+
+        # -------------------------------------------------
+        # MAX LOSING STREAK
+        # -------------------------------------------------
+
+        current_streak = 0
+
+        max_streak = 0
+
+        for r in journal["R"]:
+
+            if r < 0:
+
+                current_streak += 1
+
+                max_streak = max(
+                    max_streak,
+                    current_streak
+                )
+
+            else:
+
+                current_streak = 0
+
+        # -------------------------------------------------
+        # MAIN METRICS
+        # -------------------------------------------------
+
+        b1, b2, b3, b4, b5 = st.columns(5)
+
+        b1.metric(
+            "Trades",
+            trades
+        )
+
+        b2.metric(
+            "Win Rate",
+            f"{win_rate:.1f}%"
+        )
+
+        b3.metric(
+            "Net R",
+            f"{net_r:.2f}R"
+        )
+
+        b4.metric(
+            "Profit Factor",
+            (
+                "∞"
+                if profit_factor == float("inf")
+                else f"{profit_factor:.2f}"
+            )
+        )
+
+        b5.metric(
+            "Max Drawdown",
+            f"{max_drawdown:.2f}R"
+        )
+
+        e1, e2, e3 = st.columns(3)
+
+        e1.metric(
+            "Expectancy",
+            f"{expectancy:.3f}R"
+        )
+
+        e2.metric(
+            "Timeouts",
+            timeouts
+        )
+
+        e3.metric(
+            "Max Losing Streak",
+            max_streak
+        )
+
+        # -------------------------------------------------
+        # DIRECTION ANALYSIS
+        # -------------------------------------------------
+
+        st.subheader(
+            "📊 BUY vs SELL Analysis"
+        )
+
+        buy_trades = journal[
+            journal["Direction"] == "BUY"
+        ]
+
+        sell_trades = journal[
+            journal["Direction"] == "SELL"
+        ]
+
+        a1, a2 = st.columns(2)
+
+        with a1:
+
+            st.write("**BUY**")
+
+            if len(buy_trades) > 0:
+
+                buy_wins = (
+                    buy_trades["Result"] ==
+                    "WIN"
+                ).sum()
+
+                buy_win_rate = (
+                    buy_wins /
+                    len(buy_trades) *
+                    100
+                )
+
+                buy_net_r = (
+                    buy_trades["R"].sum()
+                )
+
+                st.metric(
+                    "BUY Trades",
+                    len(buy_trades)
+                )
+
+                st.metric(
+                    "BUY Win Rate",
+                    f"{buy_win_rate:.1f}%"
+                )
+
+                st.metric(
+                    "BUY Net R",
+                    f"{buy_net_r:.2f}R"
+                )
+
+            else:
+
+                st.info(
+                    "No BUY trades."
+                )
+
+        with a2:
+
+            st.write("**SELL**")
+
+            if len(sell_trades) > 0:
+
+                sell_wins = (
+                    sell_trades["Result"] ==
+                    "WIN"
+                ).sum()
+
+                sell_win_rate = (
+                    sell_wins /
+                    len(sell_trades) *
+                    100
+                )
+
+                sell_net_r = (
+                    sell_trades["R"].sum()
+                )
+
+                st.metric(
+                    "SELL Trades",
+                    len(sell_trades)
+                )
+
+                st.metric(
+                    "SELL Win Rate",
+                    f"{sell_win_rate:.1f}%"
+                )
+
+                st.metric(
+                    "SELL Net R",
+                    f"{sell_net_r:.2f}R"
+                )
+
+            else:
+
+                st.info(
+                    "No SELL trades."
+                )
+
+        # -------------------------------------------------
+        # SCORE ANALYSIS
+        # -------------------------------------------------
+
+        st.subheader(
+            "🎯 Performance by Score"
+        )
+
+        score_analysis = (
+            journal
+            .groupby("Score")
+            .agg(
+                Trades=("R", "count"),
+                Wins=(
+                    "Result",
+                    lambda x:
+                    (x == "WIN").sum()
+                ),
+                Net_R=("R", "sum"),
+                Average_R=("R", "mean")
+            )
+            .reset_index()
+        )
+
+        score_analysis["Win Rate %"] = (
+            score_analysis["Wins"] /
+            score_analysis["Trades"] *
+            100
+        )
+
+        score_analysis = score_analysis[
+            [
+                "Score",
+                "Trades",
+                "Wins",
+                "Win Rate %",
+                "Net_R",
+                "Average_R"
+            ]
+        ]
+
+        st.dataframe(
+            score_analysis,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # -------------------------------------------------
+        # EQUITY CURVE
+        # -------------------------------------------------
+
+        st.subheader(
+            "📈 Research Equity Curve"
+        )
+
+        equity_fig = go.Figure()
+
+        equity_fig.add_trace(
+            go.Scatter(
+                x=list(
+                    range(
+                        1,
+                        len(equity) + 1
+                    )
+                ),
+                y=equity,
+                mode="lines+markers",
+                name="Cumulative R"
+            )
+        )
+
+        equity_fig.update_layout(
+            height=350,
+            xaxis_title="Trade",
+            yaxis_title="Cumulative R"
+        )
+
+        st.plotly_chart(
+            equity_fig,
+            use_container_width=True
+        )
+
+        # -------------------------------------------------
+        # JOURNAL
+        # -------------------------------------------------
+
+        st.subheader(
+            "📒 Trade Journal"
+        )
+
+        st.dataframe(
+            journal,
+            use_container_width=True,
+            hide_index=True
+        )
 
 
+except Exception as error:
+
+    st.error(
+        "Backtest failed."
+    )
+
+    st.exception(error)
+
+
+# =========================================================
+# FOOTER
+# =========================================================
+
+st.divider()
+
+st.caption(
+    "Alpha 1.2 is a research prototype. "
+    "Market data comes from Twelve Data. "
+    "Backtest results are historical research only "
     "and are not proof of future performance. "
     "Real-money execution is disabled."
     )
