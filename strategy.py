@@ -157,106 +157,167 @@ def generate_signal(
         df_4h
     )
 
+# =====================================================
+# SCORE — SELECTIVE ALPHA 0.9
+# =====================================================
 
-    # =====================================================
-    # SCORE
-    # =====================================================
-
-    buy_score = 0
-    sell_score = 0
-
-
-    # -----------------------------------------------------
-    # 1. 15M TREND
-    # -----------------------------------------------------
-
-    if (
-        row["ema20"] >
-        row["ema50"] >
-        row["ema200"]
-    ):
-
-        buy_score += 2
-
-    elif (
-        row["ema20"] <
-        row["ema50"] <
-        row["ema200"]
-    ):
-
-        sell_score += 2
+buy_score = 0
+sell_score = 0
 
 
-    # -----------------------------------------------------
-    # 2. 1H TREND
-    # -----------------------------------------------------
+# -----------------------------------------------------
+# 1. 15M TREND ALIGNMENT
+# -----------------------------------------------------
 
-    if h1_trend == "BULLISH":
+bullish_15m = (
+    row["ema20"] >
+    row["ema50"] >
+    row["ema200"]
+)
 
-        buy_score += 2
-
-    elif h1_trend == "BEARISH":
-
-        sell_score += 2
-
-
-    # -----------------------------------------------------
-    # 3. 4H TREND
-    # -----------------------------------------------------
-
-    if h4_trend == "BULLISH":
-
-        buy_score += 2
-
-    elif h4_trend == "BEARISH":
-
-        sell_score += 2
+bearish_15m = (
+    row["ema20"] <
+    row["ema50"] <
+    row["ema200"]
+)
 
 
-    # -----------------------------------------------------
-    # 4. RSI MOMENTUM
-    # -----------------------------------------------------
+# -----------------------------------------------------
+# 2. HIGHER TIMEFRAME CONFIRMATION
+# -----------------------------------------------------
 
-    rsi = float(
-        row["rsi"]
-    )
+bullish_higher_tf = (
+    h1_trend == "BULLISH"
+    and
+    h4_trend == "BULLISH"
+)
 
-    if (
-        55 <= rsi <= 68
-    ):
-
-        buy_score += 2
-
-    elif (
-        32 <= rsi <= 45
-    ):
-
-        sell_score += 2
+bearish_higher_tf = (
+    h1_trend == "BEARISH"
+    and
+    h4_trend == "BEARISH"
+)
 
 
-    # -----------------------------------------------------
-    # 5. PRICE / EMA20 ENTRY QUALITY
-    # -----------------------------------------------------
+# -----------------------------------------------------
+# 3. RSI
+# -----------------------------------------------------
 
-    distance_from_ema20 = (
-        abs(
-            price -
-            row["ema20"]
-        ) /
-        price
-    ) * 100
+bullish_rsi = (
+    52 <= rsi <= 65
+)
+
+bearish_rsi = (
+    35 <= rsi <= 48
+)
 
 
-    # Don't reward extremely extended price.
-    if distance_from_ema20 <= 0.20:
+# -----------------------------------------------------
+# 4. EMA20 ENTRY LOCATION
+# -----------------------------------------------------
 
-        if price > row["ema20"]:
+distance_from_ema20 = (
+    abs(
+        price -
+        row["ema20"]
+    ) /
+    price
+) * 100
 
-            buy_score += 2
 
-        elif price < row["ema20"]:
+near_ema20 = (
+    distance_from_ema20 <= 0.15
+)
 
-            sell_score += 2
+
+price_above_ema20 = (
+    price > row["ema20"]
+)
+
+price_below_ema20 = (
+    price < row["ema20"]
+)
+
+
+# =====================================================
+# BUY SCORE
+# =====================================================
+
+if bullish_15m:
+
+    buy_score += 2
+
+
+if h1_trend == "BULLISH":
+
+    buy_score += 1
+
+
+if h4_trend == "BULLISH":
+
+    buy_score += 1
+
+
+if bullish_rsi:
+
+    buy_score += 2
+
+
+if (
+    near_ema20
+    and
+    price_above_ema20
+):
+
+    buy_score += 2
+
+
+# =====================================================
+# SELL SCORE
+# =====================================================
+
+if bearish_15m:
+
+    sell_score += 2
+
+
+if h1_trend == "BEARISH":
+
+    sell_score += 1
+
+
+if h4_trend == "BEARISH":
+
+    sell_score += 1
+
+
+if bearish_rsi:
+
+    sell_score += 2
+
+
+if (
+    near_ema20
+    and
+    price_below_ema20
+):
+
+    sell_score += 2
+
+
+# =====================================================
+# MAXIMUM SCORE = 8
+# =====================================================
+
+score = max(
+    buy_score,
+    sell_score
+)
+    
+
+    
+
+    
 
 
     # =====================================================
