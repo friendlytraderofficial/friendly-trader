@@ -304,3 +304,304 @@ d1.metric("15M Candles", len(df_15m))
 d2.metric("1H Candles", len(df_1h))
 d3.metric("4H Candles", len(df_4h))
 d4.metric("Source", "Twelve Data")
+# =========================================================
+# RESEARCH BACKTEST
+# =========================================================
+
+st.divider()
+
+st.subheader(
+    "🧪 50-Trade Research Backtest"
+)
+
+
+@st.cache_data
+def run_backtest(df):
+
+    data = df.copy()
+
+    data["ema20"] = (
+        data["close"]
+        .ewm(
+            span=20,
+            adjust=False
+        )
+        .mean()
+    )
+
+    data["ema50"] = (
+        data["close"]
+        .ewm(
+            span=50,
+            adjust=False
+        )
+        .mean()
+    )
+
+    previous_close = data["close"].shift(1)
+
+    tr1 = (
+        data["high"] -
+        data["low"]
+    )
+
+    tr2 = (
+        data["high"] -
+        previous_close
+    ).abs()
+
+    tr3 = (
+        data["low"] -
+        previous_close
+    ).abs()
+
+    data["tr"] = pd.concat(
+        [tr1, tr2, tr3],
+        axis=1
+    ).max(axis=1)
+
+    data["atr"] = (
+        data["tr"]
+        .rolling(14)
+        .mean()
+    )
+
+    trades = []
+
+    equity = 0.0
+    peak = 0.0
+    max_drawdown = 0.0
+
+    for i in range(
+        60,
+        len(data) - 20
+    ):
+
+        if len(trades) >= 50:
+            break
+
+        row = data.iloc[i]
+
+        atr = float(row["atr"])
+
+        if not np.isfinite(atr):
+            continue
+
+        if atr <= 0:
+            continue
+
+        entry = float(row["close"])
+
+        if row["ema20"] > row["ema50"]:
+
+            direction = "BUY"
+
+        elif row["ema20"] < row["ema50"]:
+
+            direction = "SELL"
+
+        else:
+
+            continue
+
+        stop_distance = atr * 1.5
+        target_distance = stop_distance * 3
+
+        if direction == "BUY":
+
+            stop_loss = entry - stop_distance
+            take_profit = entry + target_distance
+
+        else:
+
+            stop_loss = entry + stop_distance
+            take_profit = entry - target_distance
+
+        result_r = None
+        exit_price = None
+
+        for j in range(
+            i + 1,
+            min(i + 21, len(data))
+        ):
+
+            future = data.iloc[j]
+
+            high = float(future["high"])
+            low = float(future["low"])
+
+            if direction == "BUY":
+
+                if low <= stop_loss:
+
+                    result_r = -1.0
+                    exit_price = stop_loss
+                    break
+
+                if high >= take_profit:
+
+                    result_r = 3.0
+                    exit_price = take_profit
+                    break
+
+            else:
+
+                if high >= stop_loss:
+
+                    result_r = -1.0
+                    exit_price = stop_loss
+                    break
+
+                if low <= take_profit:
+
+                    result_r = 3.0
+                    exit_price = take_profit
+                    break
+
+        if result_r is None:
+            continue
+
+        equity += result_r
+
+        peak = max(
+            peak,
+            equity
+        )
+
+        drawdown = equity - peak
+
+        max_drawdown = min(
+            max_drawdown,
+            drawdown
+        )
+
+        trades.append(
+            {
+                "Time": row["time"],
+                "Direction": direction,
+                "Entry": round(entry, 2),
+                "Stop Loss": round(stop_loss, 2),
+                "Take Profit": round(take_profit, 2),
+                "Result R": result_r
+            }
+        )
+
+    journal = pd.DataFrame(trades)
+
+    if journal.empty:
+
+        return {
+            "trades": 0,
+            "win_rate": 0,
+            "net_r": 0,
+            "profit_factor": 0,
+            "max_drawdown": 0,
+            "journal": journal
+        }
+
+    wins = (
+        journal["Result R"] > 0
+    ).sum()
+
+    win_rate = (
+        wins / len(journal)
+    ) * 100
+
+    net_r = (
+        journal["Result R"].sum()
+    )
+
+    gross_profit = journal.loc[
+        journal["Result R"] > 0,
+        "Result R"
+    ].sum()
+
+    gross_loss = abs(
+        journal.loc[
+            journal["Result R"] < 0,
+            "Result R"
+        ].sum()
+    )
+
+    if gross_loss > 0:
+
+        profit_factor = (
+            gross_profit /
+            gross_loss
+        )
+
+    else:
+
+        profit_factor = 0
+
+    return {
+        "trades": len(journal),
+        "win_rate": win_rate,
+        "net_r": net_r,
+        "profit_factor": profit_factor,
+        "max_drawdown": max_drawdown,
+        "journal": journal
+    }
+
+
+with st.spinner(
+    "Running research backtest..."
+):
+
+    backtest = run_backtest(
+        df_15m
+    )
+
+
+b1, b2, b3, b4, b5 = st.columns(5)
+
+b1.metric(
+    "Trades",
+    backtest["trades"]
+)
+
+b2.metric(
+    "Win Rate",
+    f"{backtest['win_rate']:.1f}%"
+)
+
+b3.metric(
+    "Net R",
+    f"{backtest['net_r']:.2f}R"
+)
+
+b4.metric(
+    "Profit Factor",
+    f"{backtest['profit_factor']:.2f}"
+)
+
+b5.metric(
+    "Max Drawdown",
+    f"{backtest['max_drawdown']:.2f}R"
+)
+
+
+st.subheader(
+    "📒 Trade Journal"
+)
+
+if not backtest["journal"].empty:
+
+    st.dataframe(
+        backtest["journal"],
+        use_container_width=True,
+        hide_index=True
+    )
+
+else:
+
+    st.info(
+        "No completed trades found."
+    )
+
+
+st.caption(
+    "Backtest results are research results only "
+    "and should not be treated as proof of future performance. "
+    "Real-money execution is disabled."
+)
