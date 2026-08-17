@@ -27,6 +27,7 @@ def add_indicators(df):
         .mean()
     )
 
+    # RSI
     delta = data["close"].diff()
 
     gain = delta.clip(lower=0)
@@ -35,13 +36,20 @@ def add_indicators(df):
     avg_gain = gain.rolling(14).mean()
     avg_loss = loss.rolling(14).mean()
 
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-
-    data["rsi"] = (
-        100 - (100 / (1 + rs))
+    rs = (
+        avg_gain /
+        avg_loss.replace(0, np.nan)
     )
 
-    previous_close = data["close"].shift(1)
+    data["rsi"] = (
+        100 -
+        (100 / (1 + rs))
+    )
+
+    # ATR
+    previous_close = (
+        data["close"].shift(1)
+    )
 
     tr1 = (
         data["high"] -
@@ -68,6 +76,12 @@ def add_indicators(df):
         .rolling(14)
         .mean()
     )
+
+    # ATR percentage
+    data["atr_pct"] = (
+        data["atr"] /
+        data["close"]
+    ) * 100
 
     return data
 
@@ -111,6 +125,7 @@ def generate_signal(
     ).dropna()
 
     if data.empty:
+
         raise ValueError(
             "Not enough 15M data."
         )
@@ -130,6 +145,10 @@ def generate_signal(
         atr = price * 0.001
 
 
+    # =====================================================
+    # HIGHER TIMEFRAME TRENDS
+    # =====================================================
+
     h1_trend = get_trend(
         df_1h
     )
@@ -139,36 +158,38 @@ def generate_signal(
     )
 
 
+    # =====================================================
+    # SCORE
+    # =====================================================
+
     buy_score = 0
     sell_score = 0
 
 
-    if row["ema20"] > row["ema50"]:
+    # -----------------------------------------------------
+    # 1. 15M TREND
+    # -----------------------------------------------------
+
+    if (
+        row["ema20"] >
+        row["ema50"] >
+        row["ema200"]
+    ):
 
         buy_score += 2
 
-    elif row["ema20"] < row["ema50"]:
+    elif (
+        row["ema20"] <
+        row["ema50"] <
+        row["ema200"]
+    ):
 
         sell_score += 2
 
 
-    if price > row["ema200"]:
-
-        buy_score += 2
-
-    elif price < row["ema200"]:
-
-        sell_score += 2
-
-
-    if 55 <= row["rsi"] <= 70:
-
-        buy_score += 2
-
-    elif 30 <= row["rsi"] <= 45:
-
-        sell_score += 2
-
+    # -----------------------------------------------------
+    # 2. 1H TREND
+    # -----------------------------------------------------
 
     if h1_trend == "BULLISH":
 
@@ -178,6 +199,10 @@ def generate_signal(
 
         sell_score += 2
 
+
+    # -----------------------------------------------------
+    # 3. 4H TREND
+    # -----------------------------------------------------
 
     if h4_trend == "BULLISH":
 
@@ -189,15 +214,64 @@ def generate_signal(
 
 
     # -----------------------------------------------------
-    # ATR-BASED RISK MODEL
+    # 4. RSI MOMENTUM
     # -----------------------------------------------------
 
-    stop_distance = atr * 1.5
-
-    take_profit_distance = (
-        stop_distance * 3
+    rsi = float(
+        row["rsi"]
     )
 
+    if (
+        55 <= rsi <= 68
+    ):
+
+        buy_score += 2
+
+    elif (
+        32 <= rsi <= 45
+    ):
+
+        sell_score += 2
+
+
+    # -----------------------------------------------------
+    # 5. PRICE / EMA20 ENTRY QUALITY
+    # -----------------------------------------------------
+
+    distance_from_ema20 = (
+        abs(
+            price -
+            row["ema20"]
+        ) /
+        price
+    ) * 100
+
+
+    # Don't reward extremely extended price.
+    if distance_from_ema20 <= 0.20:
+
+        if price > row["ema20"]:
+
+            buy_score += 2
+
+        elif price < row["ema20"]:
+
+            sell_score += 2
+
+
+    # =====================================================
+    # MAXIMUM SCORE = 10
+    # =====================================================
+
+    score = max(
+        buy_score,
+        sell_score
+    )
+
+
+    # =====================================================
+    # SIGNAL THRESHOLD
+    # =====================================================
 
     if (
         buy_score >= 8
@@ -206,21 +280,6 @@ def generate_signal(
 
         direction = "BUY"
 
-        entry = price
-
-        sl = (
-            entry -
-            stop_distance
-        )
-
-        tp = (
-            entry +
-            take_profit_distance
-        )
-
-        score = buy_score
-
-
     elif (
         sell_score >= 8
         and sell_score > buy_score
@@ -228,6 +287,41 @@ def generate_signal(
 
         direction = "SELL"
 
+    else:
+
+        direction = "WAIT"
+
+
+    # =====================================================
+    # ATR RISK MODEL
+    # =====================================================
+
+    stop_distance = (
+        atr * 1.5
+    )
+
+    take_profit_distance = (
+        stop_distance * 3
+    )
+
+
+    if direction == "BUY":
+
+        entry = price
+
+        sl = (
+            entry -
+            stop_distance
+        )
+
+        tp = (
+            entry +
+            take_profit_distance
+        )
+
+
+    elif direction == "SELL":
+
         entry = price
 
         sl = (
@@ -240,12 +334,8 @@ def generate_signal(
             take_profit_distance
         )
 
-        score = sell_score
-
 
     else:
-
-        direction = "WAIT"
 
         entry = price
 
@@ -253,18 +343,22 @@ def generate_signal(
 
         tp = price
 
-        score = max(
-            buy_score,
-            sell_score
-        )
-
 
     return {
         "direction": direction,
         "score": int(score),
-        "entry": round(entry, 2),
-        "sl": round(sl, 2),
-        "tp": round(tp, 2),
+        "entry": round(
+            entry,
+            2
+        ),
+        "sl": round(
+            sl,
+            2
+        ),
+        "tp": round(
+            tp,
+            2
+        ),
         "h1_trend": h1_trend,
         "h4_trend": h4_trend
-    }
+        }
