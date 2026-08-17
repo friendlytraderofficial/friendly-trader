@@ -86,12 +86,18 @@ def trend(df):
     return "NEUTRAL"
 
 
-def generate_signal(
-    df_15m,
+def generate_signal(     
+      print(
+        "DEBUG SIGNAL:",
+        direction,
+        score,
+        buy_score,
+        sell_score
+)  df_15m,
     df_1h,
     df_4h
 ):
-
+    print("ALPHA 0.9 SIGNAL ENGINE RUNNING")
     data = indicators(
         df_15m
     ).dropna()
