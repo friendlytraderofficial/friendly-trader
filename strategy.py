@@ -2,30 +2,25 @@ import numpy as np
 import pandas as pd
 
 
-def add_indicators(df):
-
+def indicators(df):
     data = df.copy()
 
-    data = data.sort_values("time")
-    data = data.reset_index(drop=True)
+    data = data.sort_values("time").reset_index(drop=True)
 
-    data["ema20"] = (
-        data["close"]
-        .ewm(span=20, adjust=False)
-        .mean()
-    )
+    data["ema20"] = data["close"].ewm(
+        span=20,
+        adjust=False
+    ).mean()
 
-    data["ema50"] = (
-        data["close"]
-        .ewm(span=50, adjust=False)
-        .mean()
-    )
+    data["ema50"] = data["close"].ewm(
+        span=50,
+        adjust=False
+    ).mean()
 
-    data["ema200"] = (
-        data["close"]
-        .ewm(span=200, adjust=False)
-        .mean()
-    )
+    data["ema200"] = data["close"].ewm(
+        span=200,
+        adjust=False
+    ).mean()
 
     # RSI
     delta = data["close"].diff()
@@ -36,25 +31,16 @@ def add_indicators(df):
     avg_gain = gain.rolling(14).mean()
     avg_loss = loss.rolling(14).mean()
 
-    rs = (
-        avg_gain /
-        avg_loss.replace(0, np.nan)
-    )
+    rs = avg_gain / avg_loss.replace(0, np.nan)
 
-    data["rsi"] = (
-        100 -
-        (100 / (1 + rs))
+    data["rsi"] = 100 - (
+        100 / (1 + rs)
     )
 
     # ATR
-    previous_close = (
-        data["close"].shift(1)
-    )
+    previous_close = data["close"].shift(1)
 
-    tr1 = (
-        data["high"] -
-        data["low"]
-    )
+    tr1 = data["high"] - data["low"]
 
     tr2 = (
         data["high"] -
@@ -66,31 +52,17 @@ def add_indicators(df):
         previous_close
     ).abs()
 
-    data["tr"] = pd.concat(
+    data["atr"] = pd.concat(
         [tr1, tr2, tr3],
         axis=1
-    ).max(axis=1)
-
-    data["atr"] = (
-        data["tr"]
-        .rolling(14)
-        .mean()
-    )
-
-    # ATR percentage
-    data["atr_pct"] = (
-        data["atr"] /
-        data["close"]
-    ) * 100
+    ).max(axis=1).rolling(14).mean()
 
     return data
 
 
-def get_trend(df):
+def trend(df):
 
-    data = add_indicators(df)
-
-    data = data.dropna()
+    data = indicators(df).dropna()
 
     if data.empty:
         return "NEUTRAL"
@@ -98,16 +70,16 @@ def get_trend(df):
     row = data.iloc[-1]
 
     if (
-        row["ema20"] >
-        row["ema50"] >
-        row["ema200"]
+        row["ema20"] > row["ema50"]
+        and
+        row["ema50"] > row["ema200"]
     ):
         return "BULLISH"
 
     if (
-        row["ema20"] <
-        row["ema50"] <
-        row["ema200"]
+        row["ema20"] < row["ema50"]
+        and
+        row["ema50"] < row["ema200"]
     ):
         return "BEARISH"
 
@@ -120,28 +92,23 @@ def generate_signal(
     df_4h
 ):
 
-    data = add_indicators(
+    data = indicators(
         df_15m
     ).dropna()
 
-    if data.empty:
-
+    if len(data) < 50:
         raise ValueError(
             "Not enough 15M data."
         )
 
     row = data.iloc[-1]
+    previous = data.iloc[-2]
 
-    price = float(
-        row["close"]
-    )
-
-    atr = float(
-        row["atr"]
-    )
+    price = float(row["close"])
+    atr = float(row["atr"])
+    rsi = float(row["rsi"])
 
     if not np.isfinite(atr) or atr <= 0:
-
         atr = price * 0.001
 
 
@@ -149,290 +116,162 @@ def generate_signal(
     # HIGHER TIMEFRAME TRENDS
     # =====================================================
 
-    h1_trend = get_trend(
-        df_1h
-    )
-
-    h4_trend = get_trend(
-        df_4h
-    )
-
-# =====================================================
-# SCORE — SELECTIVE ALPHA 0.9
-# =====================================================
-
-buy_score = 0
-sell_score = 0
-
-
-# -----------------------------------------------------
-# 1. 15M TREND ALIGNMENT
-# -----------------------------------------------------
-
-bullish_15m = (
-    row["ema20"] >
-    row["ema50"] >
-    row["ema200"]
-)
-
-bearish_15m = (
-    row["ema20"] <
-    row["ema50"] <
-    row["ema200"]
-)
-
-
-# -----------------------------------------------------
-# 2. HIGHER TIMEFRAME CONFIRMATION
-# -----------------------------------------------------
-
-bullish_higher_tf = (
-    h1_trend == "BULLISH"
-    and
-    h4_trend == "BULLISH"
-)
-
-bearish_higher_tf = (
-    h1_trend == "BEARISH"
-    and
-    h4_trend == "BEARISH"
-)
-
-
-# -----------------------------------------------------
-# 3. RSI
-# -----------------------------------------------------
-
-bullish_rsi = (
-    52 <= rsi <= 65
-)
-
-bearish_rsi = (
-    35 <= rsi <= 48
-)
-
-
-# -----------------------------------------------------
-# 4. EMA20 ENTRY LOCATION
-# -----------------------------------------------------
-
-distance_from_ema20 = (
-    abs(
-        price -
-        row["ema20"]
-    ) /
-    price
-) * 100
-
-
-near_ema20 = (
-    distance_from_ema20 <= 0.15
-)
-
-
-price_above_ema20 = (
-    price > row["ema20"]
-)
-
-price_below_ema20 = (
-    price < row["ema20"]
-)
-
-
-# =====================================================
-# BUY SCORE
-# =====================================================
-
-if bullish_15m:
-
-    buy_score += 2
-
-
-if h1_trend == "BULLISH":
-
-    buy_score += 1
-
-
-if h4_trend == "BULLISH":
-
-    buy_score += 1
-
-
-if bullish_rsi:
-
-    buy_score += 2
-
-
-if (
-    near_ema20
-    and
-    price_above_ema20
-):
-
-    buy_score += 2
-
-
-# =====================================================
-# SELL SCORE
-# =====================================================
-
-if bearish_15m:
-
-    sell_score += 2
-
-
-if h1_trend == "BEARISH":
-
-    sell_score += 1
-
-
-if h4_trend == "BEARISH":
-
-    sell_score += 1
-
-
-if bearish_rsi:
-
-    sell_score += 2
-
-
-if (
-    near_ema20
-    and
-    price_below_ema20
-):
-
-    sell_score += 2
-
-
-# =====================================================
-# MAXIMUM SCORE = 8
-# =====================================================
-
-score = max(
-    buy_score,
-    sell_score
-)
-    
-
-    
-
-    
+    h1 = trend(df_1h)
+    h4 = trend(df_4h)
 
 
     # =====================================================
-    # MAXIMUM SCORE = 10
+    # 15M TREND
     # =====================================================
 
-    score = max(
+    bullish_15m = (
+        row["ema20"] >
+        row["ema50"] >
+        row["ema200"]
+    )
+
+    bearish_15m = (
+        row["ema20"] <
+        row["ema50"] <
+        row["ema200"]
+    )
+
+
+    # =====================================================
+    # CANDLE CONFIRMATION
+    # =====================================================
+
+    bullish_candle = (
+        row["close"] >
+        row["open"]
+    )
+
+    bearish_candle = (
+        row["close"] <
+        row["open"]
+    )
+
+
+    # =====================================================
+    # MOMENTUM CONFIRMATION
+    # =====================================================
+
+    rsi_rising = (
+        row["rsi"] >
+        previous["rsi"]
+    )
+
+    rsi_falling = (
+        row["rsi"] <
+        previous["rsi"]
+    )
+
+
+    bullish_momentum = (
+        52 <= rsi <= 65
+        and
+        rsi_rising
+    )
+
+    bearish_momentum = (
+        35 <= rsi <= 48
+        and
+        rsi_falling
+    )
+
+
+    # =====================================================
+    # EMA20 DISTANCE
+    # =====================================================
+
+    ema_distance_pct = (
+        abs(
+            price -
+            row["ema20"]
+        )
+        /
+        price
+    ) * 100
+
+
+    # Gold can move quickly, so don't enter
+    # when price is already heavily extended.
+
+    not_extended = (
+        ema_distance_pct <= 0.30
+    )
+
+
+    # =====================================================
+    # BUY SCORE
+    # =====================================================
+
+    buy_score = 0
+
+    if bullish_15m:
+        buy_score += 2
+
+    if h1 == "BULLISH":
+        buy_score += 1
+
+    if h4 == "BULLISH":
+        buy_score += 1
+
+    if bullish_momentum:
+        buy_score += 2
+
+    if not_extended:
+        buy_score += 1
+
+    if bullish_candle:
+        buy_score += 1
+
+    if price > row["ema20"]:
+        buy_score += 1
+
+    if price > previous["close"]:
+        buy_score += 1
+
+
+    # =====================================================
+    # SELL SCORE
+    # =====================================================
+
+    sell_score = 0
+
+    if bearish_15m:
+        sell_score += 2
+
+    if h1 == "BEARISH":
+        sell_score += 1
+
+    if h4 == "BEARISH":
+        sell_score += 1
+
+    if bearish_momentum:
+        sell_score += 2
+
+    if not_extended:
+        sell_score += 1
+
+    if bearish_candle:
+        sell_score += 1
+
+    if price < row["ema20"]:
+        sell_score += 1
+
+    if price < previous["close"]:
+        sell_score += 1
+
+
+    # =====================================================
+    # FINAL SCORE
+    # =====================================================
+
+    raw_score = max(
         buy_score,
         sell_score
     )
 
-
-    # =====================================================
-# SIGNAL THRESHOLD
-# =====================================================
-
-if (
-    buy_score >= 7
-    and
-    buy_score > sell_score
-    and
-    bullish_15m
-    and
-    bullish_higher_tf
-):
-
-    direction = "BUY"
-
-elif (
-    sell_score >= 7
-    and
-    sell_score > buy_score
-    and
-    bearish_15m
-    and
-    bearish_higher_tf
-):
-
-    direction = "SELL"
-
-else:
-
-    direction = "WAIT"
-
-    
-        
-
-
-    # =====================================================
-    # ATR RISK MODEL
-    # =====================================================
-
-    stop_distance = (
-        atr * 1.5
-    )
-
-    take_profit_distance = (
-        stop_distance * 3
-    )
-
-
-    if direction == "BUY":
-
-        entry = price
-
-        sl = (
-            entry -
-            stop_distance
-        )
-
-        tp = (
-            entry +
-            take_profit_distance
-        )
-
-
-    elif direction == "SELL":
-
-        entry = price
-
-        sl = (
-            entry +
-            stop_distance
-        )
-
-        tp = (
-            entry -
-            take_profit_distance
-        )
-
-
-    else:
-
-        entry = price
-
-        sl = price
-
-        tp = price
-
-
-    return {
-        "direction": direction,
-        "score": int(score),
-        "entry": round(
-            entry,
-            2
-        ),
-        "sl": round(
-            sl,
-            2
-        ),
-        "tp": round(
-            tp,
-            2
-        ),
-        "h1_trend": h1_trend,
-        "h4_trend": h4_trend
-        }
+    # Already a genuine 0-10 score.
+   
