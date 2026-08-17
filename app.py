@@ -16,11 +16,13 @@ st.set_page_config(
     layout="wide"
 )
 
-
-st.title("Friendly Trader")
+st.title(
+    "Friendly Trader"
+)
 
 st.caption(
-    "Trade Smart. Trade Friendly. — Alpha 1.0 Research Prototype"
+    "Trade Smart. Trade Friendly. — "
+    "Alpha 1.0 Research Prototype"
 )
 
 
@@ -58,7 +60,7 @@ def get_market_data(
         raise RuntimeError(
             result.get(
                 "message",
-                "No market data returned."
+                "Twelve Data returned no data."
             )
         )
 
@@ -90,40 +92,47 @@ def get_market_data(
             "low",
             "close"
         ]
-    ].dropna()
+    ]
 
-    return (
+    df = (
         df
+        .dropna()
         .sort_values("time")
         .reset_index(drop=True)
     )
 
+    return df
+
 
 # =========================================================
-# LOAD
+# LOAD DATA
 # =========================================================
 
 try:
 
-    df_15m = get_market_data(
-        "15min",
-        500
-    )
+    with st.spinner(
+        "Loading XAU/USD market data..."
+    ):
 
-    df_1h = get_market_data(
-        "1h",
-        500
-    )
+        df_15m = get_market_data(
+            "15min",
+            500
+        )
 
-    df_4h = get_market_data(
-        "4h",
-        500
-    )
+        df_1h = get_market_data(
+            "1h",
+            500
+        )
+
+        df_4h = get_market_data(
+            "4h",
+            500
+        )
 
 except Exception as error:
 
     st.error(
-        "Unable to load market data."
+        "Market data loading failed."
     )
 
     st.exception(error)
@@ -154,7 +163,7 @@ try:
 except Exception as error:
 
     st.error(
-        "Signal engine error."
+        "Signal engine failed."
     )
 
     st.exception(error)
@@ -172,41 +181,41 @@ sl = signal["sl"]
 
 tp = signal["tp"]
 
-h1 = signal["h1_trend"]
+buy_score = signal["buy_score"]
 
-h4 = signal["h4_trend"]
+sell_score = signal["sell_score"]
+
+h1_trend = signal["h1_trend"]
+
+h4_trend = signal["h4_trend"]
 
 rsi = signal["rsi"]
 
 atr = signal["atr"]
 
-buy_score = signal["buy_score"]
-
-sell_score = signal["sell_score"]
-
 
 # =========================================================
-# METRICS
+# TOP METRICS
 # =========================================================
 
-a, b, c, d = st.columns(4)
+c1, c2, c3, c4 = st.columns(4)
 
-a.metric(
+c1.metric(
     "XAUUSD",
     f"${df_15m['close'].iloc[-1]:,.2f}"
 )
 
-b.metric(
+c2.metric(
     "Signal",
     direction
 )
 
-c.metric(
+c3.metric(
     "Score",
     f"{score}/10"
 )
 
-d.metric(
+c4.metric(
     "Risk / Reward",
     "1:3"
 )
@@ -220,17 +229,17 @@ st.subheader(
     "📊 XAUUSD 15-Minute Chart"
 )
 
-chart = df_15m.tail(200)
+chart_df = df_15m.tail(200)
 
 fig = go.Figure()
 
 fig.add_trace(
     go.Candlestick(
-        x=chart["time"],
-        open=chart["open"],
-        high=chart["high"],
-        low=chart["low"],
-        close=chart["close"],
+        x=chart_df["time"],
+        open=chart_df["open"],
+        high=chart_df["high"],
+        low=chart_df["low"],
+        close=chart_df["close"],
         name="XAUUSD"
     )
 )
@@ -247,7 +256,7 @@ st.plotly_chart(
 
 
 # =========================================================
-# SIGNAL
+# SIGNAL DETAILS
 # =========================================================
 
 st.subheader(
@@ -258,19 +267,19 @@ st.markdown(
     f"## {direction}"
 )
 
-x, y, z = st.columns(3)
+p1, p2, p3 = st.columns(3)
 
-x.metric(
+p1.metric(
     "Entry",
     f"{entry:.2f}"
 )
 
-y.metric(
+p2.metric(
     "Stop Loss",
     f"{sl:.2f}"
 )
 
-z.metric(
+p3.metric(
     "Take Profit",
     f"{tp:.2f}"
 )
@@ -296,18 +305,19 @@ st.write(
 )
 
 st.write(
-    f"**1H Trend:** {h1}"
+    f"**1H Trend:** {h1_trend}"
 )
 
 st.write(
-    f"**4H Trend:** {h4}"
+    f"**4H Trend:** {h4_trend}"
 )
+
 
 if direction == "WAIT":
 
     st.warning(
         "No sufficiently strong setup. "
-        "Waiting for better confirmation."
+        "Waiting for confirmation."
     )
 
 else:
@@ -328,24 +338,24 @@ st.subheader(
     "📡 Market Data"
 )
 
-m1, m2, m3, m4 = st.columns(4)
+d1, d2, d3, d4 = st.columns(4)
 
-m1.metric(
+d1.metric(
     "15M Candles",
     len(df_15m)
 )
 
-m2.metric(
+d2.metric(
     "1H Candles",
     len(df_1h)
 )
 
-m3.metric(
+d3.metric(
     "4H Candles",
     len(df_4h)
 )
 
-m4.metric(
+d4.metric(
     "Source",
     "Twelve Data"
 )
@@ -370,19 +380,23 @@ def run_backtest(
 
     results = []
 
-    minimum_15m = 220
+    minimum_candles = 220
 
     horizon = 20
 
+    last_index = (
+        len(df_15m) -
+        horizon
+    )
+
     for i in range(
-        minimum_15m,
-        len(df_15m) - horizon
+        minimum_candles,
+        last_index
     ):
 
         current_15m = (
-            df_15m.iloc[
-                :i + 1
-            ]
+            df_15m
+            .iloc[:i + 1]
             .copy()
         )
 
@@ -437,17 +451,17 @@ def run_backtest(
             s["entry"]
         )
 
-        sl = float(
+        stop = float(
             s["sl"]
         )
 
-        tp = float(
+        target = float(
             s["tp"]
         )
 
 
         future = df_15m.iloc[
-            i + 1 :
+            i + 1:
             i + 1 + horizon
         ]
 
@@ -478,58 +492,63 @@ def run_backtest(
 
             if direction == "BUY":
 
-                hit_sl = (
-                    low <= sl
+                stop_hit = (
+                    low <= stop
                 )
 
-                hit_tp = (
-                    high >= tp
+                target_hit = (
+                    high >= target
                 )
 
             else:
 
-                hit_sl = (
-                    high >= sl
+                stop_hit = (
+                    high >= stop
                 )
 
-                hit_tp = (
-                    low <= tp
+                target_hit = (
+                    low <= target
                 )
 
 
-            if hit_sl and hit_tp:
+            # If both are touched in the
+            # same candle, use the
+            # conservative assumption:
+            # stop loss happens first.
+
+            if stop_hit and target_hit:
 
                 result = "LOSS"
 
                 result_r = -1.0
 
-                exit_price = sl
+                exit_price = stop
 
                 exit_time = candle["time"]
 
                 break
 
 
-            if hit_sl:
+            if stop_hit:
 
                 result = "LOSS"
 
                 result_r = -1.0
 
-                exit_price = sl
+                exit_price = stop
 
                 exit_time = candle["time"]
 
                 break
 
 
-            if hit_tp:
+            if target_hit:
 
                 result = "WIN"
 
                 result_r = 3.0
 
-                exit_price = tp
+                exit_price = target
 
                 exit_time = candle["time"]
 
@@ -543,16 +562,17 @@ def run_backtest(
                 "Score": s["score"],
                 "BUY Score": s["buy_score"],
                 "SELL Score": s["sell_score"],
+                "RSI": s["rsi"],
                 "Entry": round(
                     entry,
                     2
                 ),
                 "SL": round(
-                    sl,
+                    stop,
                     2
                 ),
                 "TP": round(
-                    tp,
+                    target,
                     2
                 ),
                 "Result": result,
@@ -570,7 +590,7 @@ def run_backtest(
 
 
 # =========================================================
-# EXECUTE
+# RUN BACKTEST
 # =========================================================
 
 try:
@@ -589,8 +609,8 @@ try:
     if not results:
 
         st.warning(
-            "No qualifying signals were found "
-            "in the available historical sample."
+            "No qualifying trades were found "
+            "in the available historical data."
         )
 
     else:
@@ -601,7 +621,7 @@ try:
 
 
         # -------------------------------------------------
-        # STATS
+        # STATISTICS
         # -------------------------------------------------
 
         trades = len(
@@ -609,20 +629,25 @@ try:
         )
 
         wins = (
-            journal["Result"] == "WIN"
+            journal["Result"] ==
+            "WIN"
         ).sum()
 
         losses = (
-            journal["Result"] == "LOSS"
+            journal["Result"] ==
+            "LOSS"
         ).sum()
 
         timeouts = (
-            journal["Result"] == "TIMEOUT"
+            journal["Result"] ==
+            "TIMEOUT"
         ).sum()
 
 
         win_rate = (
-            wins / trades * 100
+            wins /
+            trades *
+            100
         )
 
 
@@ -631,10 +656,12 @@ try:
         )
 
 
-        gross_profit = journal.loc[
-            journal["R"] > 0,
-            "R"
-        ].sum()
+        gross_profit = (
+            journal.loc[
+                journal["R"] > 0,
+                "R"
+            ].sum()
+        )
 
 
         gross_loss = abs(
@@ -688,48 +715,48 @@ try:
         # LOSING STREAK
         # -------------------------------------------------
 
-        max_losing_streak = 0
+        current_streak = 0
 
-        current_losing_streak = 0
+        max_streak = 0
 
         for r in journal["R"]:
 
             if r < 0:
 
-                current_losing_streak += 1
+                current_streak += 1
 
-                max_losing_streak = max(
-                    max_losing_streak,
-                    current_losing_streak
+                max_streak = max(
+                    max_streak,
+                    current_streak
                 )
 
             else:
 
-                current_losing_streak = 0
+                current_streak = 0
 
 
         # -------------------------------------------------
-        # DISPLAY
+        # METRICS
         # -------------------------------------------------
 
-        q1, q2, q3, q4, q5 = st.columns(5)
+        b1, b2, b3, b4, b5 = st.columns(5)
 
-        q1.metric(
+        b1.metric(
             "Trades",
             trades
         )
 
-        q2.metric(
+        b2.metric(
             "Win Rate",
             f"{win_rate:.1f}%"
         )
 
-        q3.metric(
+        b3.metric(
             "Net R",
             f"{net_r:.2f}R"
         )
 
-        q4.metric(
+        b4.metric(
             "Profit Factor",
             (
                 "∞"
@@ -738,32 +765,32 @@ try:
             )
         )
 
-        q5.metric(
+        b5.metric(
             "Max Drawdown",
             f"{max_drawdown:.2f}R"
         )
 
 
-        r1, r2, r3 = st.columns(3)
+        e1, e2, e3 = st.columns(3)
 
-        r1.metric(
+        e1.metric(
             "Expectancy",
-            f"{expectancy:.3f}R/trade"
+            f"{expectancy:.3f}R"
         )
 
-        r2.metric(
+        e2.metric(
             "Timeouts",
             timeouts
         )
 
-        r3.metric(
+        e3.metric(
             "Max Losing Streak",
-            max_losing_streak
+            max_streak
         )
 
 
         # -------------------------------------------------
-        # EQUITY
+        # EQUITY CURVE
         # -------------------------------------------------
 
         st.subheader(
@@ -789,7 +816,7 @@ try:
         equity_fig.update_layout(
             height=350,
             xaxis_title="Trade",
-            yaxis_title="R"
+            yaxis_title="Cumulative R"
         )
 
         st.plotly_chart(
@@ -816,7 +843,7 @@ try:
 except Exception as error:
 
     st.error(
-        "Backtest error."
+        "Backtest failed."
     )
 
     st.exception(error)
@@ -830,7 +857,8 @@ st.divider()
 
 st.caption(
     "Alpha 1.0 is a research prototype. "
-    "This system does not execute real trades. "
+    "Market data comes from Twelve Data. "
     "Backtest results are historical research only "
-    "and are not proof of future performance."
+    "and are not proof of future performance. "
+    "Real-money execution is disabled."
     )
