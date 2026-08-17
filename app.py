@@ -852,7 +852,11 @@ def run_alpha08_backtest(
 # =========================================================
 # RUN
 # =========================================================
+with st.spinner("Running Alpha 0.8 backtest..."):
+    backtest = run_alpha08_backtest(
+        df_15m,
+        df_1h,
+        df_4h
+    )
 
-with st.spinner(
-    "Running Alpha 0.
 
