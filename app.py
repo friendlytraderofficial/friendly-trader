@@ -354,7 +354,7 @@ d4.metric(
 st.divider()
 
 st.subheader(
-    "🧪 Alpha 1.1 Research Backtest"
+    "🧪 Alpha 1.2 Research Backtest"
 )
 
 
