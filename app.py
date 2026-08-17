@@ -305,7 +305,7 @@ d2.metric("1H Candles", len(df_1h))
 d3.metric("4H Candles", len(df_4h))
 d4.metric("Source", "Twelve Data")
 # =========================================================
-# RESEARCH BACKTEST
+# ALPHA 0.8 BACKTEST V2
 # =========================================================
 
 st.divider()
@@ -315,30 +315,52 @@ st.subheader(
 )
 
 
-@st.cache_data
-def run_backtest(df):
+def prepare_backtest_data(df):
 
     data = df.copy()
 
+    data = data.sort_values("time")
+    data = data.reset_index(drop=True)
+
     data["ema20"] = (
         data["close"]
-        .ewm(
-            span=20,
-            adjust=False
-        )
+        .ewm(span=20, adjust=False)
         .mean()
     )
 
     data["ema50"] = (
         data["close"]
-        .ewm(
-            span=50,
-            adjust=False
-        )
+        .ewm(span=50, adjust=False)
         .mean()
     )
 
-    previous_close = data["close"].shift(1)
+    data["ema200"] = (
+        data["close"]
+        .ewm(span=200, adjust=False)
+        .mean()
+    )
+
+    delta = data["close"].diff()
+
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.rolling(14).mean()
+    avg_loss = loss.rolling(14).mean()
+
+    rs = (
+        avg_gain /
+        avg_loss.replace(0, np.nan)
+    )
+
+    data["rsi"] = (
+        100 -
+        (100 / (1 + rs))
+    )
+
+    previous_close = (
+        data["close"].shift(1)
+    )
 
     tr1 = (
         data["high"] -
@@ -366,6 +388,60 @@ def run_backtest(df):
         .mean()
     )
 
+    return data
+
+
+def calculate_trend(df):
+
+    data = prepare_backtest_data(df)
+
+    data = data.dropna()
+
+    if data.empty:
+        return "NEUTRAL"
+
+    row = data.iloc[-1]
+
+    if (
+        row["ema20"] >
+        row["ema50"] >
+        row["ema200"]
+    ):
+        return "BULLISH"
+
+    if (
+        row["ema20"] <
+        row["ema50"] <
+        row["ema200"]
+    ):
+        return "BEARISH"
+
+    return "NEUTRAL"
+
+
+@st.cache_data
+def run_alpha08_backtest(
+    df_15m,
+    df_1h,
+    df_4h
+):
+
+    data = prepare_backtest_data(
+        df_15m
+    )
+
+    h1 = prepare_backtest_data(
+        df_1h
+    )
+
+    h4 = prepare_backtest_data(
+        df_4h
+    )
+
+    data = data.dropna()
+    h1 = h1.dropna()
+    h4 = h4.dropna()
+
     trades = []
 
     equity = 0.0
@@ -373,7 +449,7 @@ def run_backtest(df):
     max_drawdown = 0.0
 
     for i in range(
-        60,
+        200,
         len(data) - 20
     ):
 
@@ -382,7 +458,13 @@ def run_backtest(df):
 
         row = data.iloc[i]
 
-        atr = float(row["atr"])
+        price = float(
+            row["close"]
+        )
+
+        atr = float(
+            row["atr"]
+        )
 
         if not np.isfinite(atr):
             continue
@@ -390,13 +472,149 @@ def run_backtest(df):
         if atr <= 0:
             continue
 
-        entry = float(row["close"])
+
+        # ---------------------------------------------
+        # FIND THE MOST RECENT 1H TREND
+        # ---------------------------------------------
+
+        current_time = row["time"]
+
+        h1_rows = h1[
+            h1["time"] <= current_time
+        ]
+
+        h4_rows = h4[
+            h4["time"] <= current_time
+        ]
+
+        if h1_rows.empty:
+            continue
+
+        if h4_rows.empty:
+            continue
+
+        h1_row = h1_rows.iloc[-1]
+        h4_row = h4_rows.iloc[-1]
+
+
+        # ---------------------------------------------
+        # HIGHER TIMEFRAME TRENDS
+        # ---------------------------------------------
+
+        if (
+            h1_row["ema20"] >
+            h1_row["ema50"] >
+            h1_row["ema200"]
+        ):
+
+            h1_trend = "BULLISH"
+
+        elif (
+            h1_row["ema20"] <
+            h1_row["ema50"] <
+            h1_row["ema200"]
+        ):
+
+            h1_trend = "BEARISH"
+
+        else:
+
+            h1_trend = "NEUTRAL"
+
+
+        if (
+            h4_row["ema20"] >
+            h4_row["ema50"] >
+            h4_row["ema200"]
+        ):
+
+            h4_trend = "BULLISH"
+
+        elif (
+            h4_row["ema20"] <
+            h4_row["ema50"] <
+            h4_row["ema200"]
+        ):
+
+            h4_trend = "BEARISH"
+
+        else:
+
+            h4_trend = "NEUTRAL"
+
+
+        # ---------------------------------------------
+        # SCORE
+        # ---------------------------------------------
+
+        buy_score = 0
+        sell_score = 0
+
 
         if row["ema20"] > row["ema50"]:
 
-            direction = "BUY"
+            buy_score += 2
 
         elif row["ema20"] < row["ema50"]:
+
+            sell_score += 2
+
+
+        if price > row["ema200"]:
+
+            buy_score += 2
+
+        elif price < row["ema200"]:
+
+            sell_score += 2
+
+
+        if (
+            55 <= row["rsi"] <= 70
+        ):
+
+            buy_score += 2
+
+        elif (
+            30 <= row["rsi"] <= 45
+        ):
+
+            sell_score += 2
+
+
+        if h1_trend == "BULLISH":
+
+            buy_score += 2
+
+        elif h1_trend == "BEARISH":
+
+            sell_score += 2
+
+
+        if h4_trend == "BULLISH":
+
+            buy_score += 2
+
+        elif h4_trend == "BEARISH":
+
+            sell_score += 2
+
+
+        # ---------------------------------------------
+        # SIGNAL
+        # ---------------------------------------------
+
+        if (
+            buy_score >= 8
+            and buy_score > sell_score
+        ):
+
+            direction = "BUY"
+
+        elif (
+            sell_score >= 8
+            and sell_score > buy_score
+        ):
 
             direction = "SELL"
 
@@ -404,21 +622,53 @@ def run_backtest(df):
 
             continue
 
-        stop_distance = atr * 1.5
-        target_distance = stop_distance * 3
+
+        # ---------------------------------------------
+        # ATR RISK MODEL
+        # ---------------------------------------------
+
+        stop_distance = (
+            atr * 1.5
+        )
+
+        target_distance = (
+            stop_distance * 3
+        )
+
 
         if direction == "BUY":
 
-            stop_loss = entry - stop_distance
-            take_profit = entry + target_distance
+            stop_loss = (
+                price -
+                stop_distance
+            )
+
+            take_profit = (
+                price +
+                target_distance
+            )
 
         else:
 
-            stop_loss = entry + stop_distance
-            take_profit = entry - target_distance
+            stop_loss = (
+                price +
+                stop_distance
+            )
+
+            take_profit = (
+                price -
+                target_distance
+            )
+
+
+        # ---------------------------------------------
+        # LOOK FOR EXIT
+        # ---------------------------------------------
 
         result_r = None
         exit_price = None
+        exit_time = None
+
 
         for j in range(
             i + 1,
@@ -427,8 +677,14 @@ def run_backtest(df):
 
             future = data.iloc[j]
 
-            high = float(future["high"])
-            low = float(future["low"])
+            high = float(
+                future["high"]
+            )
+
+            low = float(
+                future["low"]
+            )
+
 
             if direction == "BUY":
 
@@ -436,13 +692,19 @@ def run_backtest(df):
 
                     result_r = -1.0
                     exit_price = stop_loss
+                    exit_time = future["time"]
+
                     break
+
 
                 if high >= take_profit:
 
                     result_r = 3.0
                     exit_price = take_profit
+                    exit_time = future["time"]
+
                     break
+
 
             else:
 
@@ -450,16 +712,28 @@ def run_backtest(df):
 
                     result_r = -1.0
                     exit_price = stop_loss
+                    exit_time = future["time"]
+
                     break
+
 
                 if low <= take_profit:
 
                     result_r = 3.0
                     exit_price = take_profit
+                    exit_time = future["time"]
+
                     break
 
+
         if result_r is None:
+
             continue
+
+
+        # ---------------------------------------------
+        # EQUITY
+        # ---------------------------------------------
 
         equity += result_r
 
@@ -468,53 +742,82 @@ def run_backtest(df):
             equity
         )
 
-        drawdown = equity - peak
+        drawdown = (
+            equity -
+            peak
+        )
 
         max_drawdown = min(
             max_drawdown,
             drawdown
         )
 
+
         trades.append(
             {
-                "Time": row["time"],
+                "Entry Time": row["time"],
+                "Exit Time": exit_time,
                 "Direction": direction,
-                "Entry": round(entry, 2),
-                "Stop Loss": round(stop_loss, 2),
-                "Take Profit": round(take_profit, 2),
+                "Score": max(
+                    buy_score,
+                    sell_score
+                ),
+                "Entry": round(
+                    price,
+                    2
+                ),
+                "Stop Loss": round(
+                    stop_loss,
+                    2
+                ),
+                "Take Profit": round(
+                    take_profit,
+                    2
+                ),
                 "Result R": result_r
             }
         )
 
-    journal = pd.DataFrame(trades)
+
+    journal = pd.DataFrame(
+        trades
+    )
+
 
     if journal.empty:
 
         return {
             "trades": 0,
-            "win_rate": 0,
-            "net_r": 0,
-            "profit_factor": 0,
-            "max_drawdown": 0,
+            "win_rate": 0.0,
+            "net_r": 0.0,
+            "profit_factor": 0.0,
+            "max_drawdown": 0.0,
             "journal": journal
         }
+
 
     wins = (
         journal["Result R"] > 0
     ).sum()
 
+
     win_rate = (
-        wins / len(journal)
+        wins /
+        len(journal)
     ) * 100
 
+
     net_r = (
-        journal["Result R"].sum()
+        journal["Result R"]
+        .sum()
     )
+
 
     gross_profit = journal.loc[
         journal["Result R"] > 0,
         "Result R"
     ].sum()
+
 
     gross_loss = abs(
         journal.loc[
@@ -522,6 +825,7 @@ def run_backtest(df):
             "Result R"
         ].sum()
     )
+
 
     if gross_loss > 0:
 
@@ -532,7 +836,8 @@ def run_backtest(df):
 
     else:
 
-        profit_factor = 0
+        profit_factor = 0.0
+
 
     return {
         "trades": len(journal),
@@ -544,64 +849,10 @@ def run_backtest(df):
     }
 
 
+# =========================================================
+# RUN
+# =========================================================
+
 with st.spinner(
-    "Running research backtest..."
-):
+    "Running Alpha 0.
 
-    backtest = run_backtest(
-        df_15m
-    )
-
-
-b1, b2, b3, b4, b5 = st.columns(5)
-
-b1.metric(
-    "Trades",
-    backtest["trades"]
-)
-
-b2.metric(
-    "Win Rate",
-    f"{backtest['win_rate']:.1f}%"
-)
-
-b3.metric(
-    "Net R",
-    f"{backtest['net_r']:.2f}R"
-)
-
-b4.metric(
-    "Profit Factor",
-    f"{backtest['profit_factor']:.2f}"
-)
-
-b5.metric(
-    "Max Drawdown",
-    f"{backtest['max_drawdown']:.2f}R"
-)
-
-
-st.subheader(
-    "📒 Trade Journal"
-)
-
-if not backtest["journal"].empty:
-
-    st.dataframe(
-        backtest["journal"],
-        use_container_width=True,
-        hide_index=True
-    )
-
-else:
-
-    st.info(
-        "No completed trades found."
-    )
-
-
-st.caption(
-    "Backtest results are research results only "
-    "and should not be treated as proof of future performance. "
-    "Real-money execution is disabled."
-)
